@@ -29,7 +29,7 @@ class SpatialTransformer2d(nn.Module):
                  max_tilt = 1.0,
                  max_rot = 0,
                  max_shift = 0,
-                 mrSize = 3.0):
+                 mrSize = 3.0, use_cuda = False):
         super(SpatialTransformer2d, self).__init__()
         
         ### geometrical restrictions
@@ -43,6 +43,7 @@ class SpatialTransformer2d(nn.Module):
         self.max_shift = max_shift;
         self.mrSize = mrSize;
         self.extraction_mrSize = self.max_zoom * (1.0 + self.max_shift) * self.mrSize;
+        self.use_cuda = use_cuda;
         self.gridPatchSize = int(np.ceil( self.extraction_mrSize * self.out_patch_size))
         ###
         if feature_net is None:
@@ -59,7 +60,8 @@ class SpatialTransformer2d(nn.Module):
             )
         else:
             self.spatial_transformer_feature_net = feature_net
-        self.spatial_transformer_feature_net.cuda()
+        if self.use_cuda:
+            self.spatial_transformer_feature_net.cuda()
         stride_h, stride_w = self.get_net_stride()
         assert stride_h == stride_w # I am too lazy to deal with non-square patches
         self.ST_features_stride = stride_h
@@ -93,16 +95,19 @@ class SpatialTransformer2d(nn.Module):
         )
         ### Useful constants
         self.eye2 = torch.autograd.Variable(torch.eye(2))
-        self.eye2 = self.eye2.cuda()
         self.zero = torch.autograd.Variable(torch.zeros(1,1,1))
-        self.zero = self.zero.cuda()
         self.one = torch.autograd.Variable(torch.ones(1,1,1))
-        self.one = self.one.cuda()
+        if self.use_cuda:
+            self.eye2 = self.eye2.cuda()
+            self.zero = self.zero.cuda()
+            self.one = self.one.cuda()
         return
     def get_net_stride(self):
         #Everything should be zero padded in ST_feature_net, so size is reduced be strides only 
         in_h = in_w = 1024
-        inp = torch.autograd.Variable(torch.rand(1, self.in_planes, in_h, in_w)).cuda()
+        inp = torch.autograd.Variable(torch.rand(1, self.in_planes, in_h, in_w))
+        if self.use_cuda:
+            inp = inp.cuda()
         out_f = self.spatial_transformer_feature_net.forward(inp)
         #print out_f.size();
         stride_h = in_h / out_f.size(2);
@@ -142,17 +147,15 @@ class SpatialTransformer2d(nn.Module):
         A_no_shift = torch.bmm(A_iso_scale_in_plane, A_tilt_out_of_place)
         return torch.cat([A_no_shift, shift.view(-1,2,1)], dim = 2)
 
-    def unfold_patches_for_grid(self,input_image, grid_size):
+    def unfold_patches_for_grid(self,input_image):
         #To avoid zeros, we should sample transformed patch from bigger patch, that final (in case of zoom-out or tilt)
         #needed_y = int(np.ceil(float(input_image.size(2)) / self.out_stride))
         #needed_x = int(np.ceil(float(input_image.size(3)) / self.out_stride))
-        needed_y = grid_size[2]
-        needed_x = grid_size[3]
         #floor((L_{in}  + 2 * padding - dilation * (kernel\_size - 1) - 1) / stride + 1)`
-        needed_y_pad = (needed_y - 1) * self.out_stride + self.gridPatchSize - input_image.size(2)
-        needed_x_pad = (needed_x - 1) * self.out_stride + self.gridPatchSize - input_image.size(3)
-        padx_2 = int(np.ceil(float(needed_x_pad) / 2))
-        pady_2 = int(np.ceil(float(needed_y_pad) / 2))
+        needed_y_pad = (self.psi.size(2) - 1) * self.out_stride + self.gridPatchSize - input_image.size(2)
+        needed_x_pad = (self.psi.size(3) - 1) * self.out_stride + self.gridPatchSize - input_image.size(3)
+        padx_2 = int(np.ceil(needed_x_pad / 2))
+        pady_2 = int(np.ceil(needed_y_pad / 2))
         half_ps = self.gridPatchSize / 2
         padded = nn.ZeroPad2d((padx_2,needed_x_pad - padx_2, pady_2,needed_y_pad - pady_2))(input_image)
         #print input_image.shape, padded.shape
@@ -169,7 +172,8 @@ class SpatialTransformer2d(nn.Module):
         patch_centers = torch.stack([patch_centers_x.repeat(patch_centers_y.size(0)), 
                                          patch_centers_y.repeat(patch_centers_x.size(0),1).t().contiguous().view(-1)],1)
         patch_centers = torch.autograd.Variable(patch_centers)
-        patch_centers = patch_centers.cuda()
+        if self.use_cuda:
+            patch_centers = patch_centers.cuda()
         return inp_unfolded, patch_centers
     def fold_image_back_numpy(self, patches, image_width, image_height):
         from  scipy.ndimage import zoom as imzoom
@@ -207,7 +211,7 @@ class SpatialTransformer2d(nn.Module):
 
     def forward(self, input_img):
         ST_features = self.spatial_transformer_feature_net(input_img)
-        psi = self.max_rot * self.psi_net(ST_features)
+        self.psi = self.max_rot * self.psi_net(ST_features)
         theta = self.max_rot * self.theta_net(ST_features)
         shift = self.max_shift * self.shift_net(ST_features) 
         tilt = torch.clamp(1.0 + (self.max_tilt - 1) * self.horizontal_tilt_net(ST_features),
@@ -215,7 +219,7 @@ class SpatialTransformer2d(nn.Module):
         scale = torch.clamp(1.0 + (self.max_zoom - 1) * self.iso_scale_net(ST_features),
                             min = self.min_zoom, max = self.max_zoom)
 
-        transform = self.compose_affine_matrix(psi, theta, scale, tilt, shift)
+        transform = self.compose_affine_matrix(self.psi, theta, scale, tilt, shift)
         #print transform.shape
         #print transform
         grid = torch.nn.functional.affine_grid(transform, torch.Size((transform.size(0),
@@ -223,7 +227,7 @@ class SpatialTransformer2d(nn.Module):
                                                            self.out_patch_size, 
                                                            self.out_patch_size)))
         #print grid.shape
-        inp_unfolded, patch_centers = self.unfold_patches_for_grid(input_img, psi.size());
+        inp_unfolded, patch_centers = self.unfold_patches_for_grid(input_img);
         
         grid =  grid / float(self.gridPatchSize / self.out_patch_size)
         #adjust grid for taking bigger input patch
