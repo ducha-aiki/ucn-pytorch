@@ -124,13 +124,13 @@ class SpatialTransformer2d(nn.Module):
 
     def get_tilt_matrix(self, horizontal_tilt): #X-axis anisoptropic scale
         an_s = horizontal_tilt.view(-1, 1, 1)
-        A1_x = torch.cat((an_s, self.zero.expand_as(an_s)), dim = 2)
+        A1_x = torch.cat([an_s, self.zero.expand_as(an_s)], dim = 2)
         A2_x = torch.cat([self.zero.expand_as(an_s), self.one.expand_as(an_s) / an_s], dim = 2)
         return torch.cat([A1_x,A2_x], dim = 1)
     
     def get_scale_matrix(self, iso_scale): #Isotropic scale
         iso_s = iso_scale.view(-1, 1, 1)
-        A1_x = torch.cat((iso_s, self.zero.expand_as(iso_s)), dim = 2)
+        A1_x = torch.cat([iso_s, self.zero.expand_as(iso_s)], dim = 2)
         A2_x = torch.cat([self.zero.expand_as(iso_s), iso_s], dim = 2)
         return torch.cat([A1_x,A2_x], dim = 1)
     
