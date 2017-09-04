@@ -20,6 +20,7 @@ def crop_center(img,cropx,cropy):
 class SpatialTransformer2d(nn.Module):
     def __init__(self, 
                  num_input_channels = 1,
+                 num_ouput_channels = 64,
                  feature_net = None,
                  out_patch_size = 32,
                  out_stride = 8,
@@ -49,13 +50,13 @@ class SpatialTransformer2d(nn.Module):
         if feature_net is None:
             self.spatial_transformer_feature_net = nn.Sequential(
                 nn.Conv2d(num_input_channels, 16, kernel_size=3, padding = 1, bias = False),
-                nn.BatchNorm2d(16, affine=False),
+                #nn.BatchNorm2d(16, affine=False),
                 nn.ReLU(),
                 nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1, bias = False),
-                nn.BatchNorm2d(32, affine=False),
+                #nn.BatchNorm2d(32, affine=False),
                 nn.ReLU(),
-                nn.Conv2d(32, 64, kernel_size=3, stride=2,padding=1, bias = False),
-                nn.BatchNorm2d(64, affine=False),
+                nn.Conv2d(32, num_ouput_channels, kernel_size=3, stride=2,padding=1, bias = False),
+                #nn.BatchNorm2d(num_ouput_channels, affine=False),
                 nn.ReLU()
             )
         else:
@@ -74,23 +75,23 @@ class SpatialTransformer2d(nn.Module):
 
         ### Parameters networks 
         self.psi_net =  nn.Sequential(
-            nn.Conv2d(64, 1, kernel_size=self.last_layer_stride, bias = True, stride = self.last_layer_stride),
+            nn.Conv2d(num_ouput_channels, 1, kernel_size=self.last_layer_stride, bias = True, stride = self.last_layer_stride),
             nn.Tanh()
         )
         self.theta_net = nn.Sequential(
-            nn.Conv2d(64, 1, kernel_size=self.last_layer_stride, bias = True, stride = self.last_layer_stride),
+            nn.Conv2d(num_ouput_channels, 1, kernel_size=self.last_layer_stride, bias = True, stride = self.last_layer_stride),
             nn.Tanh()
         )
         self.shift_net = nn.Sequential(
-            nn.Conv2d(64, 2, kernel_size=self.last_layer_stride, bias = True, stride = self.last_layer_stride),
+            nn.Conv2d(num_ouput_channels, 2, kernel_size=self.last_layer_stride, bias = True, stride = self.last_layer_stride),
             nn.Tanh()
         )
         self.iso_scale_net = nn.Sequential(
-            nn.Conv2d(64, 1, kernel_size=self.last_layer_stride, bias = True, stride = self.last_layer_stride),
+            nn.Conv2d(num_ouput_channels, 1, kernel_size=self.last_layer_stride, bias = True, stride = self.last_layer_stride),
             nn.Tanh()
         )
         self.horizontal_tilt_net = nn.Sequential(
-            nn.Conv2d(64, 1, kernel_size=self.last_layer_stride, bias = True, stride = self.last_layer_stride),
+            nn.Conv2d(num_ouput_channels, 1, kernel_size=self.last_layer_stride, bias = True, stride = self.last_layer_stride),
             nn.Tanh()
         )
         ### Useful constants
@@ -210,6 +211,13 @@ class SpatialTransformer2d(nn.Module):
         return (x - mp.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).expand_as(x)) / sp.unsqueeze(-1).unsqueeze(-1).unsqueeze(1).expand_as(x)
 
     def forward(self, input_img):
+        self.eye2 = torch.autograd.Variable(torch.eye(2))
+        self.zero = torch.autograd.Variable(torch.zeros(1,1,1))
+        self.one = torch.autograd.Variable(torch.ones(1,1,1))
+        if self.use_cuda:
+            self.eye2 = self.eye2.cuda()
+            self.zero = self.zero.cuda()
+            self.one = self.one.cuda()
         ST_features = self.spatial_transformer_feature_net(input_img)
         self.psi = self.max_rot * self.psi_net(ST_features)
         theta = self.max_rot * self.theta_net(ST_features)
