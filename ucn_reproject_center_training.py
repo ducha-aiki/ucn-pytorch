@@ -132,13 +132,13 @@ def create_loaders(load_random_triplets = False):
     #        transforms.Normalize((args.mean_image,), (args.std_image,))])
 
     train_loader = torch.utils.data.DataLoader(
-            dset.HPatchesSeq('/home/old-ufo/dev/LearnedDetector/dataset/', 'a',
+            dset.HPatchesSeq('/home/old-ufo/storage/learned_detector/dataset/', 'a',
                              train=True, transform=None, 
                              download=True), batch_size = 1,
         shuffle = False, **kwargs)
 
     test_loader = torch.utils.data.DataLoader(
-            dset.HPatchesSeq('/home/old-ufo/dev/LearnedDetector/dataset/', 'a',
+            dset.HPatchesSeq('/home/old-ufo/storage/learned_detector/dataset/', 'a',
                              train=False, transform=None, 
                              download=True), batch_size = 1,
         shuffle = False, **kwargs)

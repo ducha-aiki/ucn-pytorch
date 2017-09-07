@@ -17,15 +17,15 @@ import torch.backends.cudnn as cudnn
 import torch.optim as optim
 from tqdm import tqdm
 
-USE_CUDA = False
+USE_CUDA = True
 
 LOG_DIR = 'log_snaps'
-BASE_LR = 0.00000001
+BASE_LR = 0.01
 from SpatialTransformer2D import SpatialTransformer2d
 from HardNet import HardNet
-hardnet = HardNet()
-checkpoint = torch.load('HardNetLib.pth')
-hardnet.load_state_dict(checkpoint['state_dict'])
+#hardnet = HardNet()
+#checkpoint = torch.load('HardNetLib.pth')
+#hardnet.load_state_dict(checkpoint['state_dict'])
 
 class SparseImgRepresenter(nn.Module):
     def __init__(self, 
@@ -101,9 +101,7 @@ def reproject_to_canonical_Frob_batched(LHF1_inv, LHF2, batch_size = 2, use_cuda
         current_bs = fin - start
         if current_bs == 0:
             break
-        resh1 = LHF1_inv[start:fin, :, :].unsqueeze(0).expand(len2,current_bs, 3, 3)
-        resh1 = resh1.contiguous().view(-1,3,3);
-        should_be_eyes = torch.bmm(resh1,
+        should_be_eyes = torch.bmm(LHF1_inv[start:fin, :, :].unsqueeze(0).expand(len2,current_bs, 3, 3).contiguous().view(-1,3,3),
                                    LHF2.unsqueeze(1).expand(len2,current_bs, 3,3).contiguous().view(-1,3,3))
         out[start:fin, :] = torch.sum((should_be_eyes - eye1.unsqueeze(0).expand_as(should_be_eyes))**2, dim=1).sum(dim = 1).view(current_bs, len2)
     return out
@@ -126,7 +124,7 @@ def get_GT_correspondence_indexes_Fro(aff_pts1,aff_pts2, H1to2, dist_threshold =
     LHF2 = LAFs_to_H_frames(aff_pts2, use_cuda = use_cuda)
     LHF2_reprojected_to_1 = torch.bmm(H1to2.expand_as(LHF2), LHF2);
     LHF2_reprojected_to_1 = LHF2_reprojected_to_1 / LHF2_reprojected_to_1[:,2:,2:].expand_as(LHF2_reprojected_to_1);
-    LHF1 = LAFs_to_H_frames(aff_pts1, use_cuda = False)
+    LHF1 = LAFs_to_H_frames(aff_pts1, use_cuda = use_cuda)
     
     LHF1_inv = torch.autograd.Variable(torch.zeros(LHF1.size()))
     if use_cuda:
@@ -134,11 +132,8 @@ def get_GT_correspondence_indexes_Fro(aff_pts1,aff_pts2, H1to2, dist_threshold =
     for i in range(len(LHF1_inv)):
         LHF1_inv[i,:,:] = LHF1[i,:,:].inverse()
     frob_norm_dist = reproject_to_canonical_Frob_batched(LHF1_inv, LHF2_reprojected_to_1, batch_size = 2, use_cuda = use_cuda)
-    #just_centers1 = aff_pts1[:,:,2];
-    #just_centers2_repr_to_1 = LHF2_reprojected_to_1[:,0:2,2];
-    #dist  = distance_matrix_vector(just_centers2_repr_to_1, just_centers1)
     min_dist, idxs_in_2 = torch.min(frob_norm_dist,1)
-    plain_indxs_in1 = torch.autograd.Variable(torch.arange(0, idxs_in_2.size(0)))
+    plain_indxs_in1 = torch.autograd.Variable(torch.arange(0, idxs_in_2.size(0)), requires_grad = False)
     if use_cuda:
         plain_indxs_in1 = plain_indxs_in1.cuda()
     mask =  min_dist <= dist_threshold
@@ -174,13 +169,13 @@ def create_loaders(load_random_triplets = False):
     #        transforms.Normalize((args.mean_image,), (args.std_image,))])
 
     train_loader = torch.utils.data.DataLoader(
-            dset.HPatchesSeq('/home/old-ufo/dev/LearnedDetector/dataset/', 'a',
+            dset.HPatchesSeq('/home/old-ufo/storage/learned_detector/dataset/', 'a',
                              train=True, transform=None, 
                              download=True), batch_size = 1,
         shuffle = False, **kwargs)
 
     test_loader = torch.utils.data.DataLoader(
-            dset.HPatchesSeq('/home/old-ufo/dev/LearnedDetector/dataset/', 'a',
+            dset.HPatchesSeq('/home/old-ufo/storage/learned_detector/dataset/', 'a',
                              train=False, transform=None, 
                              download=True), batch_size = 1,
         shuffle = False, **kwargs)
@@ -200,6 +195,9 @@ def train(train_loader, model, optimizer, epoch, cuda = True):
         #if np.abs(np.sum(H.numpy()) - 3.0) > 0.01:
         #    continue
         H = H.squeeze(0)
+        if (img1.size(3) *img1.size(4)   > 1600*1200):
+            print img1.shape, ' too big, skipping'
+            continue
         img1 = img1.float().squeeze(0)
         img1 = img1 - img1.mean()
         img1 = img1 / 50.#(img1.std() + 1e-8)
@@ -208,7 +206,7 @@ def train(train_loader, model, optimizer, epoch, cuda = True):
         img2 = img2 / 50.#(img2.std() + 1e-8)
         if cuda:
             img1, img2, H = img1.cuda(), img2.cuda(), H.cuda()
-        img1, img2, H = Variable(img1), Variable(img2), Variable(H)
+        img1, img2, H = Variable(img1, requires_grad = False), Variable(img2, requires_grad = False), Variable(H, requires_grad = False)
         aff_norm_patches1, LAFs1 = model(img1, skip_desc = True)
         aff_norm_patches2, LAFs2 = model(img2, skip_desc = True)
         fro_dists, idxs_in1, idxs_in2 = get_GT_correspondence_indexes_Fro(LAFs1, LAFs2, H, dist_threshold = 0.02, use_cuda = cuda);
