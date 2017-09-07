@@ -195,7 +195,7 @@ def train(train_loader, model, optimizer, epoch, cuda = True):
         #if np.abs(np.sum(H.numpy()) - 3.0) > 0.01:
         #    continue
         H = H.squeeze(0)
-        if (img1.size(3) *img1.size(4)   > 1600*1200):
+        if (img1.size(3) *img1.size(4)   > 1200*800):
             print img1.shape, ' too big, skipping'
             continue
         img1 = img1.float().squeeze(0)
@@ -209,7 +209,7 @@ def train(train_loader, model, optimizer, epoch, cuda = True):
         img1, img2, H = Variable(img1, requires_grad = False), Variable(img2, requires_grad = False), Variable(H, requires_grad = False)
         aff_norm_patches1, LAFs1 = model(img1, skip_desc = True)
         aff_norm_patches2, LAFs2 = model(img2, skip_desc = True)
-        fro_dists, idxs_in1, idxs_in2 = get_GT_correspondence_indexes_Fro(LAFs1, LAFs2, H, dist_threshold = 0.02, use_cuda = cuda);
+        fro_dists, idxs_in1, idxs_in2 = get_GT_correspondence_indexes_Fro(LAFs1, LAFs2, H, dist_threshold = 0.1, use_cuda = cuda);
         if  len(fro_dists.size()) == 0:
             optimizer.zero_grad()
             print 'skip'
@@ -219,11 +219,37 @@ def train(train_loader, model, optimizer, epoch, cuda = True):
         loss.backward()
         optimizer.step()
         #adjust_learning_rate(optimizer)
-        print epoch,batch_idx, loss.data.cpu().numpy()[0]
+        print epoch,batch_idx, loss.data.cpu().numpy()[0], idxs_in1.shape
 
     torch.save({'epoch': epoch + 1, 'state_dict': model.state_dict()},
                '{}/checkpoint_{}.pth'.format(LOG_DIR, epoch))
 
+def test(test_loader, model, cuda = True):
+    # switch to train mode
+    model.eval()
+    log_interval = 1
+    pbar = enumerate(train_loader)
+    total_loss = 0
+    for batch_idx, data in pbar:
+        print 'Batch idx', batch_idx
+        img1, img2, H  = data
+        H = H.squeeze(0)
+        img1 = img1.float().squeeze(0)
+        img1 = img1 - img1.mean()
+        img1 = img1 / 50.#(img1.std() + 1e-8)
+        img2 = img2.float().squeeze(0)
+        img2 = img2 - img2.mean()
+        img2 = img2 / 50.#(img2.std() + 1e-8)
+        if cuda:
+            img1, img2, H = img1.cuda(), img2.cuda(), H.cuda()
+        img1, img2, H = Variable(img1, volatile = True), Variable(img2, volatile = True), Variable(H, volatile = True)
+        aff_norm_patches1, LAFs1 = model(img1, skip_desc = True)
+        aff_norm_patches2, LAFs2 = model(img2, skip_desc = True)
+        fro_dists, idxs_in1, idxs_in2 = get_GT_correspondence_indexes_Fro(LAFs1, LAFs2, H, dist_threshold = 100, use_cuda = cuda);
+        loss = fro_dists.mean()
+        total_loss += loss.data.cpu().numpy()[0]
+        print 'test img', batch_idx, loss.data.cpu().numpy()[0]
+    print 'Total loss:', total_loss / float(batch_idx+1)
 
 train_loader, test_loader = create_loaders()
 
@@ -245,4 +271,6 @@ for epoch in range(start, end):
     print 'epoch', epoch
     if USE_CUDA:
         model = model.cuda()
+    test(test_loader, model, cuda = USE_CUDA)
     train(train_loader, model, optimizer1, epoch, cuda = USE_CUDA)
+test(test_loader, model, cuda = USE_CUDA)
