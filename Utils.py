@@ -34,3 +34,28 @@ def str2bool(v):
         return True
     elif v.lower() in ('no', 'false', 'f', 'n', '0'):
         return False
+
+def CircularGaussKernel(kernlen=None, circ_zeros = False, sigma = None, norm = True):
+    assert ((kernlen is not None) or sigma is not None)
+    if kernlen is None:
+        kernlen = int(2.0 * 3.0 * sigma + 1.0)
+        if (kernlen % 2 == 0):
+            kernlen = kernlen + 1;
+        halfSize = float(kernlen) / 2.;
+    else:
+        halfSize = kernlen / 2;
+    r2 = float(halfSize*halfSize)
+    if sigma is None:
+        sigma2 = 0.9 * r2;
+        sigma = np.sqrt(sigma2)
+    else:
+        sigma2 = sigma * sigma    
+    x = np.linspace(0,kernlen-1,kernlen)
+    xv, yv = np.meshgrid(x, x, sparse=False, indexing='xy')
+    distsq = (xv - halfSize)**2 + (yv - halfSize)**2
+    kernel = np.exp(-( distsq/ (sigma2)))
+    if circ_zeros:
+        kernel *= (distsq <= r2).astype(np.float32)
+    if norm:
+        kernel /= np.sum(kernel)
+    return kernel
