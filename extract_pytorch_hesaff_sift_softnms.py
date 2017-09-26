@@ -30,8 +30,8 @@ from HardNet import HardNet
 from Utils import CircularGaussKernel
 
 hardnet = HardNet()
-checkpoint = torch.load('HardNetLib.pth')
-hardnet.load_state_dict(checkpoint['state_dict'])
+#checkpoint = torch.load('HardNetLib.pth')
+#hardnet.load_state_dict(checkpoint['state_dict'])
 
 def line_prepender(filename, line):
     with open(filename, 'r+') as f:
@@ -85,7 +85,7 @@ class NMS3dAndComposeA(nn.Module):
     def __init__(self, mrSize = 1.0, kernel_size = 3, threshold = 0, use_cuda = False, scales = None, border = 3):
         super(NMS3dAndComposeA, self).__init__()
         self.mrSize = mrSize;
-        self.eps = 1e-5
+        self.eps = 1e-7
         self.ks = 3
         if type(scales) is not list:
             self.grid = generate_3dgrid(3,self.ks,self.ks)
@@ -108,15 +108,17 @@ class NMS3dAndComposeA(nn.Module):
         if self.use_cuda:
             spatial_grid = spatial_grid.cuda()
         resp3d = torch.cat([low,cur,high], dim = 1)
-        exp_resp3d = torch.exp(torch.sqrt(resp3d + 1e-8) * self.beta)
+        #exp_resp3d = torch.exp(torch.sqrt(resp3d + 1e-10) * self.beta)
+        #exp_resp3d = resp3d * self.beta
         
         #residual_to_patch_center
-        softargmax3d = F.conv2d(exp_resp3d,
+        softargmax3d = F.conv2d(resp3d,
                                 self.grid,
-                                padding = 1) / (F.conv2d(exp_resp3d, self.grid_ones, padding = 1) + 1e-8)
+                                padding = 1) / (F.conv2d(resp3d, self.grid_ones, padding = 1) + 1e-8)
         
         #maxima coords
-        softargmax3d[:,1:,:,:] = softargmax3d[:,1:,:,:] + spatial_grid
+        #print softargmax3d[:,1:,:,:].shape, spatial_grid.shape
+        softargmax3d[0,1:,:,:] = softargmax3d[0,1:,:,:] + spatial_grid[:,:,:,0]
         sc_y_x = softargmax3d.view(3,-1).t()
         
         mask = (cur > low)*(cur > high) *((cur - F.max_pool2d(cur,kernel_size = 3,
@@ -285,14 +287,14 @@ class AffineShapeEstimator(nn.Module):
         self.gy =  nn.Conv2d(1, 1, kernel_size=(3,1), padding = (1,0), bias = False)
         self.gy.weight.data = torch.from_numpy(np.array([[[[0.5], [0], [-0.5]]]], dtype=np.float32))
         
-        self.gk = torch.from_numpy(CircularGaussKernel(kernlen=patch_size, circ_zeros = True).astype(np.float32))
+        self.gk = torch.from_numpy(CircularGaussKernel(kernlen=patch_size, circ_zeros = False).astype(np.float32))
         self.gk = Variable(self.gk, requires_grad=False)
         if use_cuda:
             self.gk = self.gk.cuda()
         return
     def invSqrt(self,a,b,c):
         eps = 1e-10
-        r1 = (b != 0).float() * (c - a) / (2. * b + eps) + 0.
+        r1 = (b != 0).float() * (c - a) / (2. * b + eps)
         t1 = torch.sign(r1) / (torch.abs(r1) + torch.sqrt(1. + r1*r1));
         r = 1.0 / torch.sqrt( 1. + t1*t1)
         t = t1*r;
@@ -324,15 +326,21 @@ class AffineShapeEstimator(nn.Module):
         c1 = (gy*gy * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
         l1,l2,a, b, c = self.invSqrt(a1,b1,c1)
         rat1 = l1/l2
-        eig_ratio = 1. - 1./rat1;
-        
-        den = torch.sqrt(a*c - b*b)
-        mask = (rat1 <= 2).float().view(-1);
-        a = a * mask / den + 1. * (1.- mask)
-        b = b * mask / den + 0. * (1.- mask)
-        c = c * mask / den + 1. * (1.- mask)
-        return a.view(-1,1,1),b.view(-1,1,1),c.view(-1,1,1), eig_ratio
-    
+        den = torch.sqrt(a*c - b*b + 1e-10)
+        #mask = (rat1 <= 2).float().view(-1);
+        a = a / den# + 1. * (1.- mask)
+        b = b / den# + 0. * (1.- mask)
+        c = c / den# + 1. * (1.- mask)
+        return a.view(-1,1,1),b.view(-1,1,1),c.view(-1,1,1), rat1
+
+def batch_eig2x2(A):
+    trace = A[:,0,0] + A[:,1,1]
+    delta1 = (trace*trace - 4 * ( A[:,0,0]*  A[:,1,1] -  A[:,1,0]* A[:,0,1]))
+    mask = delta1 > 0
+    delta = torch.sqrt(torch.abs(delta1))
+    l1 = mask.float() * (trace + delta) / 2.0 +  100.  * (1 - mask.float())
+    l2 = mask.float() * (trace - delta) / 2.0 +  0.001  * (1 - mask.float())
+    return l1,l2
 class OrientationDetector(nn.Module):
     def __init__(self, use_cuda = False,
                 mrSize = 3.0, patch_size = None):
@@ -403,7 +411,7 @@ class HessianAffinePatchExtractor(nn.Module):
         self.Hes = HessianResp()
         self.NMS2d = NMS2d(threshold = 0, use_cuda = use_cuda)
         self.OriDet = OrientationDetector(patch_size = 19);
-        self.AffShape = AffineShapeEstimator()
+        self.AffShape = AffineShapeEstimator(patch_size = 19)
         return
     def generate_scale_pyramid(self, x):
         nScales = 5
@@ -443,7 +451,7 @@ class HessianAffinePatchExtractor(nn.Module):
         A1_ell = torch.cat([a, b], dim = 2)
         A2_ell = torch.cat([b, c], dim = 2)
         A_ell = torch.cat([A1_ell, A2_ell], dim = 1)
-        temp_A = torch.bmm(A_ell,LAFs[:,:,0:2])
+        temp_A = torch.bmm(A_ell, LAFs[:,:,0:2])
         return temp_A#torch.cat([temp_A, LAFs[:,:,2:]], dim = 2)
     def rotateLAFs(self, LAFs, angles):
         cos_a = torch.cos(angles).view(-1, 1, 1)
@@ -453,22 +461,32 @@ class HessianAffinePatchExtractor(nn.Module):
         A_ang = torch.cat([A1_ang, A2_ang], dim = 1)
         temp_A = torch.bmm(LAFs[:,:,0:2], A_ang )
         return torch.cat([temp_A, LAFs[:,:,2:]], dim = 2)
-    def extract_patches(self, scale_pyramid, LAFs, pyr_idxs, PS = 19):
+    def extract_patches(self, scale_pyramid, LAFs, pyr_idxs, level_idxs, PS = 19, gauss_mask = False, use_cuda = False):
         patches_list = []
+        if gauss_mask:
+            mask = torch.from_numpy(CircularGaussKernel(kernlen = PS, circ_zeros = False).astype(np.float32))
+            mask = Variable(mask)
+            if use_cuda:
+                mask = mask.cuda()
         for i in range(len(scale_pyramid)):
-            cur_idxs = torch.nonzero((pyr_idxs == i).data)
-            if len(cur_idxs.size()) == 0:
-                continue
-            curr_aff = LAFs[cur_idxs.view(-1), :,:]
-            grid = torch.nn.functional.affine_grid(curr_aff, torch.Size((cur_idxs.size(0),
-                                                               1,
-                                                               PS, 
-                                                               PS)))
-            patches_list.append(torch.nn.functional.grid_sample(scale_pyramid[i][0].expand(curr_aff.size(0),
-                                                                          scale_pyramid[i][0].size(1), 
-                                                                          scale_pyramid[i][0].size(2), 
-                                                                          scale_pyramid[i][0].size(3)),  grid))
+            cur_idxs = pyr_idxs == i #torch.nonzero((pyr_idxs == i).data)
+            for j in range(1, len(level_idxs) - 1):
+                cur_lvl_idxs = torch.nonzero(((level_idxs == j) * cur_idxs).data)
+                if len(cur_lvl_idxs.size()) == 0:
+                    continue
+                curr_aff = LAFs[cur_lvl_idxs.view(-1), :,:]
+                grid = torch.nn.functional.affine_grid(curr_aff, torch.Size((cur_lvl_idxs.size(0),
+                                                                1,
+                                                                PS, 
+                                                                PS)))
+                patches_list.append(torch.nn.functional.grid_sample(scale_pyramid[i][j].expand(curr_aff.size(0),
+                                                                            scale_pyramid[i][0].size(1), 
+                                                                            scale_pyramid[i][0].size(2), 
+                                                                            scale_pyramid[i][0].size(3)),  grid))
+        
         patches = torch.cat(patches_list, dim = 0)
+        if gauss_mask:
+            patches = patches * mask.unsqueeze(0).unsqueeze(0).expand(patches.size(0),1,PS,PS)
         return patches
     def forward(self,x):
         ### Generate scale space
@@ -477,6 +495,7 @@ class HessianAffinePatchExtractor(nn.Module):
         aff_matrices = []
         top_responces = []
         pyr_idxs = []
+        level_idxs = []
         for oct_idx in range(len(sigmas)):
             print oct_idx
             octave = scale_pyr[oct_idx]
@@ -486,35 +505,64 @@ class HessianAffinePatchExtractor(nn.Module):
                 low = float(sigmas_oct[level_idx - 1 ]**4) * self.Hes(octave[level_idx - 1])
                 cur = float(sigmas_oct[level_idx]**4) * self.Hes(octave[level_idx])
                 high = float(sigmas_oct[level_idx + 1 ]**4) * self.Hes(octave[level_idx + 1])
-                
                 nms_f = NMS3dAndComposeA(scales = sigmas_oct[level_idx - 1:level_idx + 2],
-                                         mrSize = self.mrSize,
+                                         mrSize = 1.0,
                                         border = self.b)
                 top_resp, aff_matrix = nms_f(low,cur,high, self.num / 2)
                 #print  np.sum(np.isnan(top_resp.data.cpu().numpy())), np.sum(np.isnan(aff_matrix.data.cpu().numpy()))
                 aff_matrices.append(aff_matrix), top_responces.append(top_resp)
                 pyr_idxs.append(Variable(oct_idx * torch.ones(aff_matrix.size(0))))
+                level_idxs.append(Variable(level_idx * torch.ones(aff_matrix.size(0))))
         top_resp_scales = torch.cat(top_responces, dim = 0)
         aff_m_scales = torch.cat(aff_matrices,dim = 0)
         pyr_idxs_scales = torch.cat(pyr_idxs,dim = 0)
+        level_idxs_scale = torch.cat(level_idxs, dim = 0)
         #print top_resp_scales
         final_resp, idxs = torch.topk(top_resp_scales, k = max(1, min(self.num, top_resp_scales.size(0))));
         final_aff_m = torch.index_select(aff_m_scales, 0, idxs)
         final_pyr_idxs = torch.index_select(pyr_idxs_scales,0,idxs)
-        patches_small = self.extract_patches(scale_pyr, final_aff_m, final_pyr_idxs, PS = 19);
+        final_level_idxs = torch.index_select(level_idxs_scale,0,idxs)
+        ###
+        #final_aff_m[:,:,0:2] =  final_aff_m[:,:,0:2] / self.init_sigma
+        patches_small = self.extract_patches(scale_pyr, final_aff_m, final_pyr_idxs,final_level_idxs, PS = 19, gauss_mask = False);
+        ###
         
         base_A = Variable(torch.eye(2).unsqueeze(0).expand(final_pyr_idxs.size(0),2,2))
         if self.use_cuda:
             base_A = base_A.cuda()
         ### Estimate affine shape
         for i in range(self.num_Baum_iters):
-            #print i
-            a,b,c,eig_ratio = self.AffShape(patches_small)
-            base_A = self.ApplyAffine(base_A, a,b,c)
+            print i
+            a,b,c,ratio_in_patch = self.AffShape(patches_small)
+            base_A_new = self.ApplyAffine(base_A, a,b,c)
+            l1,l2 = batch_eig2x2(base_A_new)
+            ratio = torch.abs(l1 / (l2 + 1e-8))
+            mask = (ratio <= 6.0) * (ratio >= 1./6.)
+            #print mask.sum()
+            mask = mask.unsqueeze(1).unsqueeze(1).float().expand(mask.size(0),2,2)
+            base_A = base_A_new * mask + base_A * (1.0 - mask)
+            #idxs_mask = mask.data.nonzero().view(-1)
+            #base_A = base_A_new[idxs_mask,:,:]
+            #final_aff_m = final_aff_m[idxs_mask, :, :]
+            #final_pyr_idxs = final_pyr_idxs[idxs_mask]
+            
             temp_final = torch.cat([torch.bmm(base_A,final_aff_m[:,:,:2]), final_aff_m[:,:,2:] ], dim =2)
-            patches_small = self.extract_patches(scale_pyr, temp_final, final_pyr_idxs, PS = 19)      
+            if i != self.num_Baum_iters - 1:
+                patches_small = self.extract_patches(scale_pyr, temp_final, final_pyr_idxs, final_level_idxs, PS = 19, gauss_mask = False)
+            else:
+                idxs_mask = torch.nonzero(((ratio <= 6.0) * (ratio >= 1./6.)).data).view(-1)
+                temp_final = temp_final[idxs_mask, :, :]
+                final_pyr_idxs = final_pyr_idxs[idxs_mask]
+                final_level_idxs = final_level_idxs[idxs_mask]
+            
+        #
         if self.num_Baum_iters > 0:
             final_aff_m = temp_final
+        #####
+        #final_aff_m[:,:,0:2] = self.init_sigma * self.mrSize * final_aff_m[:,:,0:2]
+        final_aff_m[:,:,0:2] =  self.mrSize * final_aff_m[:,:,0:2]
+        patches_small = self.extract_patches(scale_pyr, final_aff_m, final_pyr_idxs, final_level_idxs, PS = 19, gauss_mask = False)
+        ######
         ### Detect orientation
         for i in range(0):
             ori = self.OriDet(patches_small)
@@ -523,12 +571,12 @@ class HessianAffinePatchExtractor(nn.Module):
             #print '*****'
             final_aff_m = self.rotateLAFs(final_aff_m, ori)
             #print final_aff_m[0,:,:]
-            patches_small = self.extract_patches(scale_pyr, final_aff_m, final_pyr_idxs, PS = 19)
-        ### 
-        patches = self.extract_patches(scale_pyr, final_aff_m, final_pyr_idxs, PS = self.PS)
+            patches_small = self.extract_patches(scale_pyr, final_aff_m, final_pyr_idxs, final_level_idxs,  PS = 19, gauss_mask = False)
+        ###
+        patches = self.extract_patches(scale_pyr, final_aff_m, final_pyr_idxs, final_level_idxs, PS = self.PS)
         return final_aff_m,patches,final_resp,scale_pyr
     
-HA = HessianAffinePatchExtractor( mrSize = 3.0, num_features = 3500, border = 5, num_Baum_iters = 0)
+HA = HessianAffinePatchExtractor( mrSize = 5.196, num_features = 4000, border = 5, num_Baum_iters = 16)
 aff, patches, resp, pyr = HA(var_image_reshape / 255.)
 LAFs = aff.data.cpu().numpy()
 '''
