@@ -266,7 +266,7 @@ optimizer1 = create_optimizer(model, BASE_LR, 5e-5)
 
 
 start = 0
-end = 10
+end = 100
 for epoch in range(start, end):
     print 'epoch', epoch
     if USE_CUDA:

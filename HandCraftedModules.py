@@ -2,18 +2,19 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-
+import math
 import numpy as np
 from Utils import CircularGaussKernel, GaussianBlur
 
 class ScalePyramid(nn.Module):
-    def __init__(self, nScales = 5, init_sigma = 1.6, border = 5):
+    def __init__(self, nScales = 5, init_sigma = 1.6, border = 5, use_cuda = False):
         super(ScalePyramid,self).__init__()
         self.nScales = nScales;
         self.init_sigma = init_sigma
         self.sigmaStep =  2 ** (1. / float(self.nScales))
         self.b = border
         self.minSize = 2 * self.b + 2;
+        self.use_cuda = use_cuda;
         return
     def forward(self,x):
         pixelDistance = 1.0;
@@ -21,7 +22,7 @@ class ScalePyramid(nn.Module):
         if self.init_sigma > curSigma:
             sigma = np.sqrt(self.init_sigma**2 - curSigma**2 + 1e-8)
             curSigma = self.init_sigma
-            curr = GaussianBlur(sigma = sigma)(x)
+            curr = GaussianBlur(sigma = sigma, use_cuda = self.use_cuda)(x)
         else:
             sigma = curSigma
             curr = x
@@ -31,7 +32,7 @@ class ScalePyramid(nn.Module):
         while True:
             for i in range(1,self.nScales):
                 sigma = curSigma * np.sqrt(self.sigmaStep*self.sigmaStep - 1.0 + 1e-8)
-                curr = GaussianBlur(sigma = sigma)(curr)
+                curr = GaussianBlur(sigma = sigma, use_cuda = self.use_cuda)(curr)
                 curSigma *= self.sigmaStep
                 pyr[-1].append(curr)
                 sigmas[-1].append(curSigma)

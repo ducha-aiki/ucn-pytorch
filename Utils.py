@@ -94,10 +94,11 @@ def zero_response_at_border(x, b):
     return x
 
 class GaussianBlur(nn.Module):
-    def __init__(self, sigma=1.6):
+    def __init__(self, sigma=1.6, use_cuda = False):
         super(GaussianBlur, self).__init__()
         weight = self.calculate_weights(sigma)
         self.register_buffer('buf', weight)
+        self.use_cuda = use_cuda
         return
     def calculate_weights(self,  sigma):
         kernel = CircularGaussKernel(sigma = sigma, circ_zeros = False)
@@ -106,7 +107,10 @@ class GaussianBlur(nn.Module):
         self.pad = int(np.floor(halfSize))
         return torch.from_numpy(kernel.astype(np.float32)).view(1,1,h,w);
     def forward(self, x):
-        return F.conv2d(x, Variable(self.buf), padding = self.pad)
+        w = Variable(self.buf)
+        if self.use_cuda:
+            w=w.cuda()
+        return F.conv2d(x, w, padding = self.pad)
 
 def batch_eig2x2(A):
     trace = A[:,0,0] + A[:,1,1]
