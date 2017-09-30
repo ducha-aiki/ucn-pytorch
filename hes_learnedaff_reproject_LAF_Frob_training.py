@@ -99,7 +99,8 @@ class HessianAffinePatchExtractor(nn.Module):
         A1_ell = torch.cat([a, b], dim = 2)
         A2_ell = torch.cat([b, c], dim = 2)
         A_ell = torch.cat([A1_ell, A2_ell], dim = 1)
-        temp_A = torch.bmm(A_ell, LAFs[:,:,0:2])
+        den = torch.sqrt(torch.abs(a*c - b*b + 1e-8))
+        temp_A = torch.bmm(A_ell / den, LAFs[:,:,0:2])
         return temp_A#torch.cat([temp_A, LAFs[:,:,2:]], dim = 2)
     def rotateLAFs(self, LAFs, angles):
         cos_a = torch.cos(angles).view(-1, 1, 1)
@@ -190,6 +191,15 @@ class HessianAffinePatchExtractor(nn.Module):
         pyr_idxs_scales = torch.cat(pyr_idxs,dim = 0)
         level_idxs_scale = torch.cat(level_idxs, dim = 0)
         #print top_resp_scales
+        idxs_mask = ((1 - ((aff_m_scales[:,0,2] + self.mrSize *aff_m_scales[:,0,0]) > 1.0).float()).byte()).data
+        idxs_mask = idxs_mask * (1 - ((aff_m_scales[:,1,2].data + self.mrSize *aff_m_scales[:,1,1].data) > 1.0).float()).byte()
+        idxs_mask = idxs_mask * (1 - ((aff_m_scales[:,0,2].data - self.mrSize *aff_m_scales[:,0,0].data) < 0).float()).byte()
+        idxs_mask = idxs_mask * (1 - ((aff_m_scales[:,1,2].data - self.mrSize *aff_m_scales[:,1,1].data) < 0).float()).byte()
+        idxs_mask = torch.nonzero(idxs_mask).view(-1).long()
+        aff_m_scales = aff_m_scales[idxs_mask,:,:]
+        top_resp_scales = top_resp_scales[idxs_mask]
+        pyr_idxs_scales = pyr_idxs_scales[idxs_mask]
+        level_idxs_scale = level_idxs_scale[idxs_mask]
         final_resp, idxs = torch.topk(top_resp_scales, k = max(1, min(self.num, top_resp_scales.size(0))));
         final_aff_m = torch.index_select(aff_m_scales, 0, idxs)
         final_pyr_idxs = torch.index_select(pyr_idxs_scales,0,idxs)
@@ -219,12 +229,12 @@ class HessianAffinePatchExtractor(nn.Module):
             abc = self.AffShape(patches_small)
             #print abc.shape
             base_A_new = self.ApplyAffine(base_A, 1.0 + abc[:,0,:,:].contiguous().view(-1,1,1),abc[:,1,:,:].contiguous().view(-1,1,1),1.0 + abc[:,2,:,:].contiguous().view(-1,1,1))
-            l1,l2 = batch_eig2x2(base_A_new)
-            ratio = torch.abs(l1 / (l2 + 1e-8))
-            mask = (ratio <= 6.0) * (ratio >= 1./6.)
+            #l1,l2 = batch_eig2x2(base_A_new)
+            #ratio = torch.abs(l1 / (l2 + 1e-8))
+            #mask = (ratio <= 6.0) * (ratio >= 1./6.)
             #print mask.sum()
-            mask = mask.unsqueeze(1).unsqueeze(1).float().expand(mask.size(0),2,2)
-            base_A = base_A_new * mask + base_A * (1.0 - mask)
+            #mask = mask.unsqueeze(1).unsqueeze(1).float().expand(mask.size(0),2,2)
+            #base_A = base_A_new * mask + base_A * (1.0 - mask)
             #idxs_mask = mask.data.nonzero().view(-1)
             #base_A = base_A_new[idxs_mask,:,:]
             #final_aff_m = final_aff_m[idxs_mask, :, :]
@@ -233,11 +243,19 @@ class HessianAffinePatchExtractor(nn.Module):
             temp_final = torch.cat([torch.bmm(base_A,final_aff_m[:,:,:2]), final_aff_m[:,:,2:] ], dim =2)
             if i != self.num_Baum_iters - 1:
                 patches_small = self.extract_patches(scale_pyr, temp_final, final_pyr_idxs, final_level_idxs, PS = 16, gauss_mask = False, pyr_inv_idxs = pyr_inv_idxs);
-            #else:
-            #    idxs_mask = torch.nonzero(((ratio <= 6.0) * (ratio >= 1./6.)).data).view(-1)
-            #    temp_final = temp_final[idxs_mask, :, :]
-            #    final_pyr_idxs = final_pyr_idxs[idxs_mask]
-            #    final_level_idxs = final_level_idxs[idxs_mask]
+            '''else:
+                l1,l2 = batch_eig2x2(base_A_new)
+                ratio = torch.abs(l1 / (l2 + 1e-8))
+                idxs_mask = ((ratio <= 6.0) * (ratio >= 1./6.)* (1 - ((temp_final[:,0,2] + self.mrSize *temp_final[:,0,0]) > 1.0).float()).byte()).data
+                idxs_mask = idxs_mask * (1 - ((temp_final[:,1,2].data + self.mrSize *temp_final[:,1,1].data) > 1.0).float()).byte()
+                idxs_mask = idxs_mask * (1 - ((temp_final[:,0,2].data - self.mrSize *temp_final[:,0,0].data) < 0).float()).byte()
+                idxs_mask = idxs_mask * (1 - ((temp_final[:,1,2].data - self.mrSize *temp_final[:,1,1].data) < 0).float()).byte()
+                idxs_mask = torch.nonzero(idxs_mask).view(-1).long()
+                temp_final = temp_final[idxs_mask, :, :]
+                final_pyr_idxs = final_pyr_idxs[idxs_mask]
+                final_level_idxs = final_level_idxs[idxs_mask]
+                pyr_inv_idxs = pyr_inv_idxs[idxs_mask]
+        '''
         #
         if self.num_Baum_iters > 0:
             final_aff_m = temp_final
@@ -368,13 +386,13 @@ def create_loaders(load_random_triplets = False):
     #        transforms.Normalize((args.mean_image,), (args.std_image,))])
 
     train_loader = torch.utils.data.DataLoader(
-            dset.HPatchesSeq('/home/old-ufo/storage/learned_detector/dataset/', 'a',
+            dset.HPatchesSeq('/home/old-ufo/storage/learned_detector/dataset/', 'b',
                              train=True, transform=None, 
                              download=True), batch_size = 1,
         shuffle = True, **kwargs)
 
     test_loader = torch.utils.data.DataLoader(
-            dset.HPatchesSeq('/home/old-ufo/storage/learned_detector/dataset/', 'a',
+            dset.HPatchesSeq('/home/old-ufo/storage/learned_detector/dataset/', 'b',
                              train=False, transform=None, 
                              download=True), batch_size = 1,
         shuffle = False, **kwargs)
@@ -422,7 +440,7 @@ def train(train_loader, model, optimizer, epoch, cuda = True):
             print 'skip'
             continue
         loss = fro_dists.mean()
-        patch_dist = torch.mean((aff_norm_patches1[idxs_in1.data.long(),:,:,:] - aff_norm_patches2[idxs_in2.data.long(), :,:,:]) **2)
+        patch_dist = 2.0 * torch.mean((aff_norm_patches1[idxs_in1.data.long(),:,:,:] - aff_norm_patches2[idxs_in2.data.long(), :,:,:]) **2)
         print loss.data.cpu().numpy()[0], patch_dist.data.cpu().numpy()[0]
         loss += patch_dist
         optimizer.zero_grad()
@@ -471,7 +489,7 @@ def test(test_loader, model, cuda = True):
 
 train_loader, test_loader = create_loaders()
 
-HA = HessianAffinePatchExtractor( mrSize = 3.0, num_features = 750, border = 5, num_Baum_iters = 1, use_cuda = USE_CUDA)
+HA = HessianAffinePatchExtractor( mrSize = 3.0, num_features = 750, border = 10, num_Baum_iters = 1, use_cuda = USE_CUDA)
 
 
 model = HA
