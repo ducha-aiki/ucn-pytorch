@@ -158,6 +158,25 @@ class SparseImgRepresenter(nn.Module):
             descs = self.descriptor(aff_norm_patches);
             return aff_norm_patches, LAFs, descs
         return aff_norm_patches, LAFs
+def BinvSqrt2(M):
+    s = torch.sqrt(M[:,0,0] * M[:,1,1] - M[:,1,0]*M[:,0,1])
+    t = torch.sqrt(M[:,0,0] + M[:,1,1] + 2.*s)
+    R = (1.0 / t.unsqueeze(-1).unsqueeze(-1).expand(M.size(0),2,2)) * (M + s.unsqueeze(-1).unsqueeze(-1).expand(M.size(0),2,2) * Variable(torch.eye(2).unsqueeze(0).expand(M.size(0),2,2)))
+    return R
+
+def torch_Ells2LAF(ells):
+    #print ells
+    A23 = torch.zeros(ells.size(0), 2,3)
+    #print A23
+    A23[:,0,2] = ells[:,0]
+    A23[:,1,2] = ells[:,1]
+    A23[:,0:2, 0:2] = BinvSqrt2(torch.cat([torch.cat([ells[:,4:].unsqueeze(-1), ells[:,3:4].unsqueeze(-1)], dim = 2),
+                                           torch.cat([ells[:,3:4].unsqueeze(-1), ells[:,2:3].unsqueeze(-1)], dim = 2)],
+                                         dim = 1))
+    A23[:, 0, 1] = 0
+    A23[:, 1, 0] = -A23[:, 1, 0]
+    return A23
+
 def LAF2pts(LAF, n_pts = 50):
     a = np.linspace(0, 2*np.pi, n_pts);
     x = list(np.cos(a))
@@ -324,14 +343,21 @@ class AffineShapeEstimator(nn.Module):
         a1 = (gx*gx * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
         b1 = (gx*gy * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
         c1 = (gy*gy * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
-        l1,l2,a, b, c = self.invSqrt(a1,b1,c1)
-        rat1 = l1/l2
-        den = torch.sqrt(a*c - b*b + 1e-10)
+        A = BinvSqrt2(torch.cat([torch.cat([c1.unsqueeze(-1).unsqueeze(-1), b1.unsqueeze(-1).unsqueeze(-1)], dim = 2),
+                                        torch.cat([b1.unsqueeze(-1).unsqueeze(-1), a1.unsqueeze(-1).unsqueeze(-1)], dim = 2)],
+                                        dim = 1))
+        #l1,l2,a, b, c = self.invSqrt(a1,b1,c1)
+        #rat1 = l1/l2
+        den = torch.sqrt(A[:,0,0]*A[:,1,1] - A[:,1,0]*A[:,0,1] + 1e-10)
+        A = A / den.unsqueeze(-1).unsqueeze(-1).expand(A.size(0), 2,2)
+        A[:,1,0] = -A[:,1,0]
+        A[:,0,1] = 0
+
         #mask = (rat1 <= 2).float().view(-1);
-        a = a / den# + 1. * (1.- mask)
-        b = b / den# + 0. * (1.- mask)
-        c = c / den# + 1. * (1.- mask)
-        return a.view(-1,1,1),b.view(-1,1,1),c.view(-1,1,1), rat1
+        #a = a / den# + 1. * (1.- mask)
+        #b = b / den# + 0. * (1.- mask)
+        #c = c / den# + 1. * (1.- mask)
+        return A#a.view(-1,1,1),b.view(-1,1,1),c.view(-1,1,1), rat1
 
 def batch_eig2x2(A):
     trace = A[:,0,0] + A[:,1,1]
@@ -533,8 +559,12 @@ class HessianAffinePatchExtractor(nn.Module):
         ### Estimate affine shape
         for i in range(self.num_Baum_iters):
             print i
-            a,b,c,ratio_in_patch = self.AffShape(patches_small)
-            base_A_new = self.ApplyAffine(base_A, a,b,c)
+            A = self.AffShape(patches_small)
+            base_A_new = torch.bmm(A, base_A);
+            
+            #a,b,c,ratio_in_patch = self.AffShape(patches_small) #old
+            #base_A_new = self.ApplyAffine(base_A, a,b,c)
+            
             l1,l2 = batch_eig2x2(base_A_new)
             ratio = torch.abs(l1 / (l2 + 1e-8))
             mask = (ratio <= 6.0) * (ratio >= 1./6.)
@@ -549,11 +579,11 @@ class HessianAffinePatchExtractor(nn.Module):
             temp_final = torch.cat([torch.bmm(base_A,final_aff_m[:,:,:2]), final_aff_m[:,:,2:] ], dim =2)
             if i != self.num_Baum_iters - 1:
                 patches_small = self.extract_patches(scale_pyr, temp_final, final_pyr_idxs, final_level_idxs, PS = 19, gauss_mask = False)
-            else:
-                idxs_mask = torch.nonzero(((ratio <= 6.0) * (ratio >= 1./6.)).data).view(-1)
-                temp_final = temp_final[idxs_mask, :, :]
-                final_pyr_idxs = final_pyr_idxs[idxs_mask]
-                final_level_idxs = final_level_idxs[idxs_mask]
+            #else:
+            #    idxs_mask = torch.nonzero(((ratio <= 6.0) * (ratio >= 1./6.)).data).view(-1)
+            #    temp_final = temp_final[idxs_mask, :, :]
+            #    final_pyr_idxs = final_pyr_idxs[idxs_mask]
+            #    final_level_idxs = final_level_idxs[idxs_mask]
             
         #
         if self.num_Baum_iters > 0:
@@ -576,7 +606,7 @@ class HessianAffinePatchExtractor(nn.Module):
         patches = self.extract_patches(scale_pyr, final_aff_m, final_pyr_idxs, final_level_idxs, PS = self.PS)
         return final_aff_m,patches,final_resp,scale_pyr
     
-HA = HessianAffinePatchExtractor( mrSize = 5.196, num_features = 4000, border = 5, num_Baum_iters = 16)
+HA = HessianAffinePatchExtractor( mrSize = 1.0, num_features = 4000, border = 5, num_Baum_iters = 5)
 aff, patches, resp, pyr = HA(var_image_reshape / 255.)
 LAFs = aff.data.cpu().numpy()
 '''
@@ -608,7 +638,52 @@ ells = convert_LAF_to_this_stupid_Oxford_ellipse_format(var_image_reshape.data.c
 
 np.savetxt(output_fname, np.hstack([ells, descriptors_for_net]), delimiter=' ', fmt='%10.9f')
 '''
-ells = convert_LAF_to_this_stupid_Oxford_ellipse_format(var_image_reshape.data.cpu().numpy()[0,0,:,:], LAFs)
+def convertLAFs_to_A23format(LAFs):
+    sh = LAFs.shape
+    if (len(sh) == 3) and (sh[1]  == 2) and (sh[2] == 3): # n x 2 x 3 classical [A, (x;y)] matrix
+        work_LAFs = deepcopy(LAFs)
+    elif (len(sh) == 2) and (sh[1]  == 7): #flat format, x y scale a11 a12 a21 a22
+        work_LAFs = np.zeros((sh[0], 2,3))
+        work_LAFs[:,0,2] = LAFs[:,0]
+        work_LAFs[:,1,2] = LAFs[:,1]
+        work_LAFs[:,0,0] = LAFs[:,2] * LAFs[:,3] 
+        work_LAFs[:,0,1] = LAFs[:,2] * LAFs[:,4]
+        work_LAFs[:,1,0] = LAFs[:,2] * LAFs[:,5]
+        work_LAFs[:,1,1] = LAFs[:,2] * LAFs[:,6]
+    elif (len(sh) == 2) and (sh[1]  == 6): #flat format, x y s*a11 s*a12 s*a21 s*a22
+        work_LAFs = np.zeros((sh[0], 2,3))
+        work_LAFs[:,0,2] = LAFs[:,0]
+        work_LAFs[:,1,2] = LAFs[:,1]
+        work_LAFs[:,0,0] = LAFs[:,2] 
+        work_LAFs[:,0,1] = LAFs[:,3]
+        work_LAFs[:,1,0] = LAFs[:,4]
+        work_LAFs[:,1,1] = LAFs[:,5]
+    else:
+        print 'Unknown LAF format'
+        return None
+    return work_LAFs
+
+def LAFs2ell(in_LAFs):
+    LAFs = convertLAFs_to_A23format(in_LAFs)
+    ellipses = np.zeros((len(LAFs),5))
+    for i in range(len(LAFs)):
+        LAF = deepcopy(LAFs[i,:,:])
+        scale = np.sqrt(LAF[0,0]*LAF[1,1]  - LAF[0,1]*LAF[1, 0] + 1e-10)
+        u, W, v = np.linalg.svd(LAF[0:2,0:2] / scale, full_matrices=True)
+        W[0] = 1. / (W[0]*W[0]*scale*scale)
+        W[1] = 1. / (W[1]*W[1]*scale*scale)
+        A =  np.matmul(np.matmul(u, np.diag(W)), u.transpose())
+        ellipses[i,0] = LAF[0,2]
+        ellipses[i,1] = LAF[1,2]
+        ellipses[i,2] = A[0,0]
+        ellipses[i,3] = A[1,0]
+        ellipses[i,4] = A[1,1]
+    return ellipses
+LAFs[:,0,2] *= float(img.shape[1])
+LAFs[:,1,2] *= float(img.shape[0])
+LAFs[:,0:2,0:2] *= float(min(img.shape[0],img.shape[1]))
+ells = LAFs2ell(LAFs)
+
 np.savetxt(output_fname, ells, delimiter=' ', fmt='%10.10f')
 line_prepender(output_fname, str(len(ells)))
 line_prepender(output_fname, '1.0')

@@ -21,9 +21,8 @@ class NMS2d(nn.Module):
         
 
 class NMS3dAndComposeA(nn.Module):
-    def __init__(self, mrSize = 1.0, kernel_size = 3, threshold = 0, use_cuda = False, scales = None, border = 3):
+    def __init__(self,kernel_size = 3, threshold = 0, use_cuda = False, scales = None, border = 3):
         super(NMS3dAndComposeA, self).__init__()
-        self.mrSize = mrSize;
         self.eps = 1e-7
         self.ks = 3
         if type(scales) is not list:
@@ -72,7 +71,7 @@ class NMS3dAndComposeA(nn.Module):
         sc_y_x_topk[:,2] = sc_y_x_topk[:,2] / float(cur.size(3))
         
         min_size = float(min((cur.size(2)), cur.size(3)))
-        base_A = Variable(self.mrSize * torch.eye(2).unsqueeze(0).expand(idxs.size(0),2,2).float() / min_size, requires_grad=False)
+        base_A = Variable((torch.eye(2).float()  / min_size).unsqueeze(0).expand(idxs.size(0),2,2), requires_grad=False)
         if self.use_cuda:
             base_A = base_A.cuda()
         A = sc_y_x_topk[:,:1].unsqueeze(1).expand_as(base_A) * base_A
