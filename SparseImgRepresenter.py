@@ -51,7 +51,7 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
         pyr_idxs = []
         level_idxs = []
         for oct_idx in range(len(sigmas)):
-            print oct_idx
+            #print oct_idx
             octave = scale_pyr[oct_idx]
             sigmas_oct = sigmas[oct_idx]
             pix_dists_oct = pix_dists[oct_idx]
@@ -91,7 +91,7 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
             base_A = base_A.cuda()
         ### Estimate affine shape
         for i in range(self.num_Baum_iters):
-            print i
+            #print i
             A = self.AffNet(patches_small)
             base_A = torch.bmm(A, base_A);           
             temp_LAFs = torch.cat([torch.bmm(base_A,LAFs[:,:,0:2]), LAFs[:,:,2:] ], dim =2)

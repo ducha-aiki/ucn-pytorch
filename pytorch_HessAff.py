@@ -18,6 +18,7 @@ from copy import deepcopy
 
 from SparseImgRepresenter import ScaleSpaceAffinePatchExtractor
 from LAF import denormalizeLAFs, LAFs2ell
+from Utils import line_prepender
 
 
 LOG_DIR = 'log_snaps'
@@ -39,7 +40,7 @@ var_image = torch.autograd.Variable(torch.from_numpy(img.astype(np.float32)))
 var_image_reshape = var_image.view(1, 1, var_image.size(0),var_image.size(1))
 
     
-HA = ScaleSpaceAffinePatchExtractor( mrSize = 5.0, num_features = 3000, border = 1, num_Baum_iters = 5)
+HA = ScaleSpaceAffinePatchExtractor( mrSize = 5.192, num_features = 4000, border = 1, num_Baum_iters = 5)
 
 LAFs, patches, resp, pyr = HA(var_image_reshape / 255.)
 LAFs = denormalizeLAFs(LAFs, img.shape[1], img.shape[0], use_cuda = USE_CUDA).data.cpu().numpy()
@@ -47,5 +48,5 @@ LAFs = denormalizeLAFs(LAFs, img.shape[1], img.shape[0], use_cuda = USE_CUDA).da
 ells = LAFs2ell(LAFs)
 
 np.savetxt(output_fname, ells, delimiter=' ', fmt='%10.10f')
-#line_prepender(output_fname, str(len(ells)))
-#line_prepender(output_fname, '1.0')
+line_prepender(output_fname, str(len(ells)))
+line_prepender(output_fname, '1.0')
