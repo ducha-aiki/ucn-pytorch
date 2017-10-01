@@ -63,11 +63,11 @@ class HessianResp(nn.Module):
         self.gyy =  nn.Conv2d(1, 1, kernel_size=(3,1), padding = (1,0), bias = False)
         self.gyy.weight.data = torch.from_numpy(np.array([[[[1.0], [-2.0], [1.0]]]], dtype=np.float32))
         return
-    def forward(self, x):
+    def forward(self, x, scale):
         gxx = self.gxx(x)
         gyy = self.gyy(x)
         gxy = self.gy(self.gx(x))
-        return torch.abs(gxx * gyy - gxy * gxy)
+        return torch.abs(gxx * gyy - gxy * gxy) * (scale **4)
 
 
 class AffineShapeEstimator(nn.Module):
@@ -160,10 +160,10 @@ class OrientationDetector(nn.Module):
         super(OrientationDetector, self).__init__()
         if patch_size is None:
             patch_size = 32;
-        self.bin_weight_kernel_size, self.bin_weight_stride = self.get_bin_weight_kernel_size_and_stride(patch_size, 1)
+        self.PS = patch_size;
+        self.bin_weight_kernel_size, self.bin_weight_stride = self.get_bin_weight_kernel_size_and_stride(self.PS, 1)
         self.mrSize = mrSize;
         self.num_ang_bins = 36
-        self.patch_size = patch_size;
         self.gx =  nn.Conv2d(1, 1, kernel_size=(1,3), padding = (0,1), bias = False)
         self.gx.weight.data = torch.from_numpy(np.array([[[[0.5, 0, -0.5]]]], dtype=np.float32))
         
@@ -173,7 +173,7 @@ class OrientationDetector(nn.Module):
         self.angular_smooth =  nn.Conv1d(1, 1, kernel_size=3, padding = 1, bias = False)
         self.angular_smooth.weight.data = torch.from_numpy(np.array([[[0.33, 0.34, 0.33]]], dtype=np.float32))
         
-        self.gk = torch.from_numpy(CircularGaussKernel(kernlen=patch_size).astype(np.float32))
+        self.gk = torch.from_numpy(CircularGaussKernel(kernlen=self.PS).astype(np.float32))
         self.gk = Variable(self.gk, requires_grad=False)
         if use_cuda:
             self.gk = self.gk.cuda()
