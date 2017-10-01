@@ -17,7 +17,7 @@ import torch.backends.cudnn as cudnn
 import torch.optim as optim
 from tqdm import tqdm
 
-USE_CUDA = False
+USE_CUDA = True
 
 LOG_DIR = 'log_snaps'
 BASE_LR = 0.01
@@ -104,14 +104,14 @@ def create_loaders(load_random_triplets = False):
     #        transforms.Normalize((args.mean_image,), (args.std_image,))])
 
     train_loader = torch.utils.data.DataLoader(
-            dset.HPatchesSeq('/home/old-ufo/dev/LearnedDetector/dataset', 'a',
-                             train=True, transform=None, 
+            dset.HPatchesSeq('/home/old-ufo/storage/learned_detector/dataset/', 'b',
+                             train=True, transform=None,
                              download=True), batch_size = 1,
         shuffle = True, **kwargs)
 
     test_loader = torch.utils.data.DataLoader(
-            dset.HPatchesSeq('/home/old-ufo/dev/LearnedDetector/dataset', 'a',
-                             train=False, transform=None, 
+            dset.HPatchesSeq('/home/old-ufo/storage/learned_detector/dataset/', 'b',
+                             train=False, transform=None,
                              download=True), batch_size = 1,
         shuffle = False, **kwargs)
 
@@ -169,7 +169,7 @@ def test(test_loader, model, cuda = True):
     # switch to train mode
     model.eval()
     log_interval = 1
-    pbar = enumerate(train_loader)
+    pbar = enumerate(test_loader)
     total_loss = 0
     for batch_idx, data in pbar:
         print 'Batch idx', batch_idx
@@ -198,7 +198,8 @@ def test(test_loader, model, cuda = True):
 
 train_loader, test_loader = create_loaders()
 
-HA = ScaleSpaceAffinePatchExtractor( mrSize = 5.0, num_features = 3000, border = 1, num_Baum_iters = 5, AffNet = BaumNet())
+HA = ScaleSpaceAffinePatchExtractor( mrSize = 3.0, num_features = 750,
+                                      border = 1, num_Baum_iters = 1, AffNet = BaumNet(), use_cuda = USE_CUDA)
 
 
 model = HA

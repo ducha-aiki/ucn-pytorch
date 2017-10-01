@@ -41,7 +41,7 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
             self.AffNet = AffNet
         else:
             self.AffNet = AffineShapeEstimator(patch_size = 19)
-        self.ScalePyrGen = ScalePyramid(nScales = self.nlevels, init_sigma = self.init_sigma, border = self.b)
+        self.ScalePyrGen = ScalePyramid(nScales = self.nlevels, init_sigma = self.init_sigma, border = self.b, use_cuda = use_cuda)
         return
     def multiScaleDetector(self,x):
         scale_pyr, sigmas, pix_dists = self.ScalePyrGen(x)
@@ -60,7 +60,7 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
                 cur = self.RespNet(octave[level_idx ], (sigmas_oct[level_idx ]))
                 high = self.RespNet(octave[level_idx + 1], (sigmas_oct[level_idx + 1 ]))
                 nms_f = NMS3dAndComposeA(scales = sigmas_oct[level_idx - 1:level_idx + 2],
-                                        border = self.b, mrSize = self.mrSize)
+                                        border = self.b, mrSize = self.mrSize, use_cuda = self.use_cuda)
                 top_resp, aff_matrix = nms_f(low,cur,high, self.num)
                 if top_resp is None:
                     break
