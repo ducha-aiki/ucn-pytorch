@@ -88,7 +88,7 @@ class AffineShapeEstimator(nn.Module):
         if use_cuda:
             self.gk = self.gk.cuda()
         return
-    def BinvSqrt2(self, M):
+    '''def BinvSqrt2(self, M):
         s = torch.sqrt(M[:,0,0] * M[:,1,1] - M[:,1,0]*M[:,0,1])
         t = torch.sqrt(M[:,0,0] + M[:,1,1] + 2.*s)
         R = (1.0 / t.unsqueeze(-1).unsqueeze(-1).expand(M.size(0),2,2)) * (M + s.unsqueeze(-1).unsqueeze(-1).expand(M.size(0),2,2) * Variable(torch.eye(2).unsqueeze(0).expand(M.size(0),2,2)))
@@ -99,8 +99,8 @@ class AffineShapeEstimator(nn.Module):
         a1 = (gx*gx * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
         b1 = (gx*gy * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
         c1 = (gy*gy * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
-        A = self.BinvSqrt2(torch.cat([torch.cat([a1.unsqueeze(-1).unsqueeze(-1), b1.unsqueeze(-1).unsqueeze(-1)], dim = 2),
-                                        torch.cat([b1.unsqueeze(-1).unsqueeze(-1), c1.unsqueeze(-1).unsqueeze(-1)], dim = 2)],
+        A = self.BinvSqrt2(torch.cat([torch.cat([c1.unsqueeze(-1).unsqueeze(-1), b1.unsqueeze(-1).unsqueeze(-1)], dim = 2),
+                                        torch.cat([b1.unsqueeze(-1).unsqueeze(-1), a1.unsqueeze(-1).unsqueeze(-1)], dim = 2)],
                                         dim = 1))
         #l1,l2,a, b, c = self.invSqrt(a1,b1,c1)
         #rat1 = l1/l2
@@ -108,9 +108,8 @@ class AffineShapeEstimator(nn.Module):
         A = A / den.unsqueeze(-1).unsqueeze(-1).expand(A.size(0), 2,2)
         #A[:,1,0] = -A[:,1,0]
         #A[:,0,1] = 0
-        return A
-
-    '''def invSqrt(self,a,b,c):
+        return A'''
+    def invSqrt(self,a,b,c):
         eps = 1e-10
         r1 = (b != 0).float() * (c - a) / (2. * b + eps)
         t1 = torch.sign(r1) / (torch.abs(r1) + torch.sqrt(1. + r1*r1));
@@ -143,13 +142,16 @@ class AffineShapeEstimator(nn.Module):
         b1 = (gx*gy * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
         c1 = (gy*gy * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
         l1,l2,a, b, c = self.invSqrt(a1,b1,c1)
-        rat1 = l1/l2
-        den = torch.sqrt(a*c - b*b + 1e-10)
+        #rat1 = l1/l2
+        #den = torch.sqrt(a*c - b*b + 1e-10)
         #mask = (rat1 <= 2).float().view(-1);
-        a = a / den# + 1. * (1.- mask)
-        b = b / den# + 0. * (1.- mask)
-        c = c / den# + 1. * (1.- mask)
-        return a.view(-1,1,1),b.view(-1,1,1),c.view(-1,1,1), rat1'''
+        #a = a / den# + 1. * (1.- mask)
+        #b = b / den# + 0. * (1.- mask)
+        #c = c / den# + 1. * (1.- mask)
+        return torch.cat([torch.cat([a.unsqueeze(-1).unsqueeze(-1), b.unsqueeze(-1).unsqueeze(-1)], dim = 2),
+                                        torch.cat([b.unsqueeze(-1).unsqueeze(-1), c.unsqueeze(-1).unsqueeze(-1)], dim = 2)],
+                                        dim = 1)
+        #return a.view(-1,1,1),b.view(-1,1,1),c.view(-1,1,1), rat1
         
 
 class OrientationDetector(nn.Module):

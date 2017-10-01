@@ -21,7 +21,7 @@ class NMS2d(nn.Module):
         
 
 class NMS3dAndComposeA(nn.Module):
-    def __init__(self,kernel_size = 3, threshold = 0, use_cuda = False, scales = None, border = 3):
+    def __init__(self,kernel_size = 3, threshold = 0, use_cuda = False, scales = None, border = 3, mrSize = 1.0):
         super(NMS3dAndComposeA, self).__init__()
         self.eps = 1e-7
         self.ks = 3
@@ -34,6 +34,7 @@ class NMS3dAndComposeA(nn.Module):
         self.use_cuda = use_cuda
         self.cube_idxs = []
         self.border = border
+        self.mrSize = mrSize
         self.beta = 1.0
         self.grid_ones = Variable(torch.ones(3,3,3,3), requires_grad=False)
         self.NMS2d = NMS2d(kernel_size, threshold, use_cuda )
@@ -54,24 +55,30 @@ class NMS3dAndComposeA(nn.Module):
                                 self.grid,
                                 padding = 1) / (F.conv2d(resp3d, self.grid_ones, padding = 1) + 1e-8)
         
-        #maxima coords
+        ##maxima coords
         #print softargmax3d[:,1:,:,:].shape, spatial_grid.shape
         softargmax3d[0,1:,:,:] = softargmax3d[0,1:,:,:] + spatial_grid[:,:,:,0]
         sc_y_x = softargmax3d.view(3,-1).t()
         
-        nmsed_resp = zero_response_at_border(self.NMS2d(cur) * ((cur > low) * (cur > high)).float(), self.border)
+        mrSize_border = int(self.grid.max().data[0] * self.mrSize);
+        
+        nmsed_resp = zero_response_at_border(self.NMS2d(cur) * ((cur > low) * (cur > high)).float(), mrSize_border)
+        
+        if (nmsed_resp.mean().data[0] == 0):
+            return None,None
         
         nmsed_resp_flat = nmsed_resp.view(-1)
         topk_val, idxs = torch.topk(nmsed_resp_flat, 
                                     k = max(1, min(int(num_feats), nmsed_resp_flat.size(0))));
         
         sc_y_x_topk = sc_y_x[idxs.data,:]
+        min_size = float(min((cur.size(2)), cur.size(3)))
         
+        sc_y_x_topk[:,0] = sc_y_x_topk[:,0] / min_size
         sc_y_x_topk[:,1] = sc_y_x_topk[:,1] / float(cur.size(2))
         sc_y_x_topk[:,2] = sc_y_x_topk[:,2] / float(cur.size(3))
         
-        min_size = float(min((cur.size(2)), cur.size(3)))
-        base_A = Variable((torch.eye(2).float()  / min_size).unsqueeze(0).expand(idxs.size(0),2,2), requires_grad=False)
+        base_A = Variable(torch.eye(2).float().unsqueeze(0).expand(idxs.size(0),2,2), requires_grad=False)
         if self.use_cuda:
             base_A = base_A.cuda()
         A = sc_y_x_topk[:,:1].unsqueeze(1).expand_as(base_A) * base_A
