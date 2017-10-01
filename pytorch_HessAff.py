@@ -6,7 +6,6 @@ import os
 import time
 
 from PIL import Image
-from pytorch_sift import SIFTNet
 from torch.autograd import Variable
 import torch.backends.cudnn as cudnn
 import torch.optim as optim
