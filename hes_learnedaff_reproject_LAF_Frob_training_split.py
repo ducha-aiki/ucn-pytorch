@@ -143,7 +143,9 @@ def train(train_loader, model, optimizer, epoch, cuda = True):
             img1, img2, H = img1.cuda(), img2.cuda(), H.cuda()
         img1, img2, H = Variable(img1, requires_grad = False), Variable(img2, requires_grad = False), Variable(H, requires_grad = False)
         LAFs1, aff_norm_patches1, resp1, pyr1 = HA(img1 / 255.)
+        LAFs1 = denormalizeLAFs(LAFs1, img1.size(3), img1.size(2), use_cuda = USE_CUDA)
         LAFs2, aff_norm_patches2, resp2, pyr2 = HA(img2 / 255.)
+        LAFs2 = denormalizeLAFs(LAFs2, img2.size(3), img2.size(2), use_cuda = USE_CUDA)
         if (len(LAFs1) == 0) or (len(LAFs2) == 0):
             optimizer.zero_grad()
             continue
@@ -184,7 +186,9 @@ def test(test_loader, model, cuda = True):
             img1, img2, H = img1.cuda(), img2.cuda(), H.cuda()
         img1, img2, H = Variable(img1, volatile = True), Variable(img2, volatile = True), Variable(H, volatile = True)
         LAFs1, aff_norm_patches1, resp1, pyr1 = HA(img1 / 255.)
+        LAFs1 = denormalizeLAFs(LAFs1, img1.size(3), img1.size(2), use_cuda = USE_CUDA)
         LAFs2, aff_norm_patches2, resp2, pyr2 = HA(img2 / 255.)
+        LAFs2 = denormalizeLAFs(LAFs2, img2.size(3), img2.size(2), use_cuda = USE_CUDA)
         if (len(LAFs1) == 0) or (len(LAFs2) == 0):
             continue
         fro_dists, idxs_in1, idxs_in2 = get_GT_correspondence_indexes_Fro(LAFs1, LAFs2, H, dist_threshold = 10, use_cuda = cuda);
