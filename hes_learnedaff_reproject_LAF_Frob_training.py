@@ -176,13 +176,13 @@ def create_loaders(load_random_triplets = False):
     #        transforms.Normalize((args.mean_image,), (args.std_image,))])
 
     train_loader = torch.utils.data.DataLoader(
-            dset.HPatchesSeq('/home/old-ufo/storage/learned_detector/dataset/', 'a',
+            dset.HPatchesSeq('/home/old-ufo/storage/learned_detector/dataset/', 'b',
                              train=True, transform=None, 
                              download=True), batch_size = 1,
         shuffle = True, **kwargs)
 
     test_loader = torch.utils.data.DataLoader(
-            dset.HPatchesSeq('/home/old-ufo/storage/learned_detector/dataset/', 'a',
+            dset.HPatchesSeq('/home/old-ufo/storage/learned_detector/dataset/', 'b',
                              train=False, transform=None, 
                              download=True), batch_size = 1,
         shuffle = False, **kwargs)
@@ -230,7 +230,7 @@ def train(train_loader, model, optimizer, epoch, cuda = True):
             print 'skip'
             continue
         loss = fro_dists.mean()
-        patch_dist = torch.mean((aff_norm_patches1[idxs_in1.data.long(),:,:,:] - aff_norm_patches2[idxs_in2.data.long(), :,:,:]) **2)
+        patch_dist = 2.0 * torch.mean((aff_norm_patches1[idxs_in1.data.long(),:,:,:] - aff_norm_patches2[idxs_in2.data.long(), :,:,:]) **2)
         print loss.data.cpu().numpy()[0], patch_dist.data.cpu().numpy()[0]
         loss += patch_dist
         optimizer.zero_grad()
