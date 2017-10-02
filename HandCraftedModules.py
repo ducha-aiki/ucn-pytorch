@@ -8,11 +8,11 @@ from Utils import CircularGaussKernel, GaussianBlur
 from LAF import abc2A,rectifyAffineTransformationUpIsUp
 
 class ScalePyramid(nn.Module):
-    def __init__(self, nScales = 5, init_sigma = 1.6, border = 5, use_cuda = False):
+    def __init__(self, nLevels = 5, init_sigma = 1.6, border = 5, use_cuda = False):
         super(ScalePyramid,self).__init__()
-        self.nScales = nScales;
+        self.nLevels = nLevels;
         self.init_sigma = init_sigma
-        self.sigmaStep =  2 ** (1. / float(self.nScales))
+        self.sigmaStep =  2 ** (1. / float(self.nLevels))
         self.b = border
         self.minSize = 2 * self.b + 2;
         self.use_cuda = use_cuda;
@@ -25,13 +25,12 @@ class ScalePyramid(nn.Module):
             curSigma = self.init_sigma
             curr = GaussianBlur(sigma = sigma, use_cuda = self.use_cuda)(x)
         else:
-            sigma = curSigma
             curr = x
         sigmas = [[curSigma]]
         pixel_dists = [[1.0]]
         pyr = [[curr]]
         while True:
-            for i in range(1,self.nScales):
+            for i in range(1,self.nLevels):
                 sigma = curSigma * np.sqrt(self.sigmaStep*self.sigmaStep - 1.0 + 1e-8)
                 curr = GaussianBlur(sigma = sigma, use_cuda = self.use_cuda)(curr)
                 curSigma *= self.sigmaStep
@@ -68,7 +67,7 @@ class HessianResp(nn.Module):
         gxx = self.gxx(F.pad(x, (1,1,0, 0), 'replicate'))
         gyy = self.gyy(F.pad(x, (0,0, 1,1), 'replicate'))
         gxy = self.gy(F.pad(self.gx(F.pad(x, (1,1,0, 0), 'replicate')), (0,0, 1,1), 'replicate'))
-        return torch.abs(gxx * gyy - gxy * gxy) * (scale **4)
+        return torch.abs(gxx * gyy - gxy * gxy) * (scale**4)
 
 
 class AffineShapeEstimator(nn.Module):

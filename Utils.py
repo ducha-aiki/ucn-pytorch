@@ -86,11 +86,13 @@ def generate_3dgrid(d, h, w, centered = True):
     return grid3d
 
 def zero_response_at_border(x, b):
-    x[:, :,  0:b, :] =  0
-    x[:, :,  x.size(2)-b: , :] =  0
-
-    x[:, :, :,  0:b] =  0
-    x[:, :, :,   x.size(3) - b:] =  0
+    if (b < x.size(3)) and (b < x.size(2)):
+        x[:, :,  0:b, :] =  0
+        x[:, :,  x.size(2) - b: , :] =  0
+        x[:, :, :,  0:b] =  0
+        x[:, :, :,   x.size(3) - b: ] =  0
+    else:
+        return x * 0
     return x
 
 class GaussianBlur(nn.Module):

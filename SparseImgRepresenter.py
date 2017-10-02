@@ -41,7 +41,7 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
             self.AffNet = AffNet
         else:
             self.AffNet = AffineShapeEstimator(patch_size = 19)
-        self.ScalePyrGen = ScalePyramid(nScales = self.nlevels, init_sigma = self.init_sigma, border = self.b)
+        self.ScalePyrGen = ScalePyramid(nLevels = self.nlevels, init_sigma = self.init_sigma, border = self.b)
         return
     
     def multiScaleDetector(self,x):
@@ -56,13 +56,25 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
             octave = scale_pyr[oct_idx]
             sigmas_oct = sigmas[oct_idx]
             pix_dists_oct = pix_dists[oct_idx]
-            for level_idx in range(1,len(octave)-1):
-                low =  self.RespNet(octave[level_idx - 1], (sigmas_oct[level_idx - 1 ]))
-                cur = self.RespNet(octave[level_idx ], (sigmas_oct[level_idx ]))
+            low = None
+            cur = None
+            high = None
+            octaveMap = (scale_pyr[oct_idx][0] * 0).byte()
+            for level_idx in range(1, len(octave)-1):
+                if cur is not None:
+                    low = cur
+                else:
+                    low = self.RespNet(octave[level_idx - 1], (sigmas_oct[level_idx - 1 ]))
+                if high is not None:
+                    cur = high
+                else:
+                    cur = self.RespNet(octave[level_idx ], (sigmas_oct[level_idx ]))
                 high = self.RespNet(octave[level_idx + 1], (sigmas_oct[level_idx + 1 ]))
+                #
                 nms_f = NMS3dAndComposeA(scales = sigmas_oct[level_idx - 1:level_idx + 2],
                                         border = self.b, mrSize = self.mrSize)
-                top_resp, aff_matrix = nms_f(low,cur,high, self.num)
+                #
+                top_resp, aff_matrix, octaveMap  = nms_f(low, cur, high, self.num, octaveMap)
                 if top_resp is None:
                     break
                 aff_matrices.append(aff_matrix), top_responces.append(top_resp)
