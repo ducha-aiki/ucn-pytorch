@@ -5,6 +5,7 @@ from torch.autograd import Variable
 import math
 import numpy as np
 from Utils import CircularGaussKernel, GaussianBlur
+from LAF import abc2A,rectifyAffineTransformationUpIsUp
 
 class ScalePyramid(nn.Module):
     def __init__(self, nScales = 5, init_sigma = 1.6, border = 5, use_cuda = False):
@@ -51,22 +52,22 @@ class HessianResp(nn.Module):
     def __init__(self):
         super(HessianResp, self).__init__()
         
-        self.gx =  nn.Conv2d(1, 1, kernel_size=(1,3), padding = (0,1), bias = False)
+        self.gx =  nn.Conv2d(1, 1, kernel_size=(1,3), bias = False)
         self.gx.weight.data = torch.from_numpy(np.array([[[[0.5, 0, -0.5]]]], dtype=np.float32))
 
-        self.gy =  nn.Conv2d(1, 1, kernel_size=(3,1), padding = (1,0), bias = False)
+        self.gy =  nn.Conv2d(1, 1, kernel_size=(3,1), bias = False)
         self.gy.weight.data = torch.from_numpy(np.array([[[[0.5], [0], [-0.5]]]], dtype=np.float32))
 
-        self.gxx =  nn.Conv2d(1, 1, kernel_size=(1,3), padding = (0,1), bias = False)
+        self.gxx =  nn.Conv2d(1, 1, kernel_size=(1,3),bias = False)
         self.gxx.weight.data = torch.from_numpy(np.array([[[[1.0, -2.0, 1.0]]]], dtype=np.float32))
         
-        self.gyy =  nn.Conv2d(1, 1, kernel_size=(3,1), padding = (1,0), bias = False)
+        self.gyy =  nn.Conv2d(1, 1, kernel_size=(3,1), bias = False)
         self.gyy.weight.data = torch.from_numpy(np.array([[[[1.0], [-2.0], [1.0]]]], dtype=np.float32))
         return
     def forward(self, x, scale):
-        gxx = self.gxx(x)
-        gyy = self.gyy(x)
-        gxy = self.gy(self.gx(x))
+        gxx = self.gxx(F.pad(x, (1,1,0, 0), 'replicate'))
+        gyy = self.gyy(F.pad(x, (0,0, 1,1), 'replicate'))
+        gxy = self.gy(F.pad(self.gx(F.pad(x, (1,1,0, 0), 'replicate')), (0,0, 1,1), 'replicate'))
         return torch.abs(gxx * gyy - gxy * gxy) * (scale **4)
 
 
@@ -77,10 +78,10 @@ class AffineShapeEstimator(nn.Module):
         self.threshold = threshold;
         self.use_cuda = use_cuda;
         self.PS = patch_size
-        self.gx =  nn.Conv2d(1, 1, kernel_size=(1,3), padding = (0,1), bias = False)
+        self.gx =  nn.Conv2d(1, 1, kernel_size=(1,3), bias = False)
         self.gx.weight.data = torch.from_numpy(np.array([[[[0.5, 0, -0.5]]]], dtype=np.float32))
         
-        self.gy =  nn.Conv2d(1, 1, kernel_size=(3,1), padding = (1,0), bias = False)
+        self.gy =  nn.Conv2d(1, 1, kernel_size=(3,1), bias = False)
         self.gy.weight.data = torch.from_numpy(np.array([[[[0.5], [0], [-0.5]]]], dtype=np.float32))
         
         self.gk = torch.from_numpy(CircularGaussKernel(kernlen=patch_size, circ_zeros = False).astype(np.float32))
@@ -91,7 +92,10 @@ class AffineShapeEstimator(nn.Module):
     '''def BinvSqrt2(self, M):
         s = torch.sqrt(M[:,0,0] * M[:,1,1] - M[:,1,0]*M[:,0,1])
         t = torch.sqrt(M[:,0,0] + M[:,1,1] + 2.*s)
-        R = (1.0 / t.unsqueeze(-1).unsqueeze(-1).expand(M.size(0),2,2)) * (M + s.unsqueeze(-1).unsqueeze(-1).expand(M.size(0),2,2) * Variable(torch.eye(2).unsqueeze(0).expand(M.size(0),2,2)))
+        if self.use_cuda:
+            R = (1.0 / t.unsqueeze(-1).unsqueeze(-1).expand(M.size(0),2,2)) * (M + s.unsqueeze(-1).unsqueeze(-1).expand(M.size(0),2,2) * Variable(torch.eye(2).unsqueeze(0).expand(M.size(0),2,2).cuda()))
+        else:
+            R = (1.0 / t.unsqueeze(-1).unsqueeze(-1).expand(M.size(0),2,2)) * (M + s.unsqueeze(-1).unsqueeze(-1).expand(M.size(0),2,2) * Variable(torch.eye(2).unsqueeze(0).expand(M.size(0),2,2)))
         return R
     def forward(self, x):
         gx = self.gx(x)
@@ -99,15 +103,9 @@ class AffineShapeEstimator(nn.Module):
         a1 = (gx*gx * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
         b1 = (gx*gy * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
         c1 = (gy*gy * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
-        A = self.BinvSqrt2(torch.cat([torch.cat([c1.unsqueeze(-1).unsqueeze(-1), b1.unsqueeze(-1).unsqueeze(-1)], dim = 2),
-                                        torch.cat([b1.unsqueeze(-1).unsqueeze(-1), a1.unsqueeze(-1).unsqueeze(-1)], dim = 2)],
-                                        dim = 1))
-        #l1,l2,a, b, c = self.invSqrt(a1,b1,c1)
-        #rat1 = l1/l2
-        den = torch.sqrt(A[:,0,0]*A[:,1,1] - A[:,1,0]*A[:,0,1] + 1e-10)
+        A = self.BinvSqrt2(abc2A(a1,b1,c1));
+        den = torch.sqrt(torch.abs(A[:,0,0]*A[:,1,1] - A[:,1,0]*A[:,0,1])) + 1e-12
         A = A / den.unsqueeze(-1).unsqueeze(-1).expand(A.size(0), 2,2)
-        #A[:,1,0] = -A[:,1,0]
-        #A[:,0,1] = 0
         return A'''
     def invSqrt(self,a,b,c):
         eps = 1e-10
@@ -136,22 +134,22 @@ class AffineShapeEstimator(nn.Module):
 
         return l1,l2, new_a, new_b, new_c
     def forward(self,x):
-        gx = self.gx(x)
-        gy = self.gy(x)
+        gx = self.gx(F.pad(x, (1,1,0, 0), 'replicate'))
+        gy = self.gy(F.pad(x, (0,0, 1,1), 'replicate'))
         a1 = (gx*gx * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
         b1 = (gx*gy * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
         c1 = (gy*gy * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
         l1,l2,a, b, c = self.invSqrt(a1,b1,c1)
         #rat1 = l1/l2
-        #den = torch.sqrt(a*c - b*b + 1e-10)
+        den = torch.sqrt(torch.abs(a*c - b*b + 1e-10))
         #mask = (rat1 <= 2).float().view(-1);
-        #a = a / den# + 1. * (1.- mask)
-        #b = b / den# + 0. * (1.- mask)
-        #c = c / den# + 1. * (1.- mask)
+        a = a / den# + 1. * (1.- mask)
+        b = b / den# + 0. * (1.- mask)
+        c = c / den# + 1. * (1.- mask)
         return torch.cat([torch.cat([a.unsqueeze(-1).unsqueeze(-1), b.unsqueeze(-1).unsqueeze(-1)], dim = 2),
                                         torch.cat([b.unsqueeze(-1).unsqueeze(-1), c.unsqueeze(-1).unsqueeze(-1)], dim = 2)],
                                         dim = 1)
-        #return a.view(-1,1,1),b.view(-1,1,1),c.view(-1,1,1), rat1
+        #return a.view(-1,1,1),b.view(-1,1,1),c.view(-1,1,1), rat1'''
         
 
 class OrientationDetector(nn.Module):
@@ -164,10 +162,10 @@ class OrientationDetector(nn.Module):
         self.bin_weight_kernel_size, self.bin_weight_stride = self.get_bin_weight_kernel_size_and_stride(self.PS, 1)
         self.mrSize = mrSize;
         self.num_ang_bins = 36
-        self.gx =  nn.Conv2d(1, 1, kernel_size=(1,3), padding = (0,1), bias = False)
+        self.gx =  nn.Conv2d(1, 1, kernel_size=(1,3),  bias = False)
         self.gx.weight.data = torch.from_numpy(np.array([[[[0.5, 0, -0.5]]]], dtype=np.float32))
         
-        self.gy =  nn.Conv2d(1, 1, kernel_size=(3,1), padding = (1,0), bias = False)
+        self.gy =  nn.Conv2d(1, 1, kernel_size=(3,1), bias = False)
         self.gy.weight.data = torch.from_numpy(np.array([[[[0.5], [0], [-0.5]]]], dtype=np.float32))
         
         self.angular_smooth =  nn.Conv1d(1, 1, kernel_size=3, padding = 1, bias = False)
@@ -184,8 +182,8 @@ class OrientationDetector(nn.Module):
         return bin_weight_kernel_size, bin_weight_stride
 
     def forward(self, x):
-        gx = self.gx(x)
-        gy = self.gy(x)
+        gx = self.gx(F.pad(x, (1,1,0, 0), 'replicate'))
+        gy = self.gy(F.pad(x, (0,0, 1,1), 'replicate'))
         mag = torch.sqrt(gx * gx + gy * gy + 1e-10)
         mag = mag * self.gk.unsqueeze(0).unsqueeze(0).expand_as(mag)
         ori = torch.atan2(gy,gx)

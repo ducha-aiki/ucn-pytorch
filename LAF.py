@@ -42,9 +42,16 @@ def LAF2pts(LAF, n_pts = 50):
     H_pts_out[:,1] = H_pts_out[:,1] / H_pts_out[:, 2]
     return H_pts_out[:,0:2]
 
-def abc2A(a,b,c):
+def abc2A(a,b,c, normalize = False):
     A1_ell = torch.cat([a.view(-1,1,1), b.view(-1,1,1)], dim = 2)
     A2_ell = torch.cat([b.view(-1,1,1), c.view(-1,1,1)], dim = 2)
+    return torch.cat([A1_ell, A2_ell], dim = 1)
+
+def rectifyAffineTransformationUpIsUp(A):
+    det = torch.sqrt(torch.abs(A[:,0,0]*A[:,1,1] - A[:,1,0]*A[:,0,1] + 1e-10))
+    b2a2 = torch.sqrt(A[:,0,1] * A[:,0,1] + A[:,0,0] * A[:,0,0])
+    A1_ell = torch.cat([(b2a2 / det).contiguous().view(-1,1,1), 0 * A[:,1,1].contiguous().view(-1,1,1)], dim = 2)
+    A2_ell = torch.cat([((A[:,1,1]*A[:,0,1]+A[:,1,0]*A[:,0,0])/(b2a2*det)).contiguous().view(-1,1,1), (det / b2a2).contiguous().view(-1,1,1)], dim = 2)
     return torch.cat([A1_ell, A2_ell], dim = 1)
 
 def angles2A(angles):

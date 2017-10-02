@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from copy import deepcopy
 from Utils import GaussianBlur, batch_eig2x2, line_prepender
-from LAF import LAFs2ell,abc2A, angles2A, generate_patch_grid_from_normalized_LAFs, extract_patches, get_inverted_pyr_index, denormalizeLAFs, extract_patches_from_pyramid_with_inv_index
+from LAF import LAFs2ell,abc2A, angles2A, generate_patch_grid_from_normalized_LAFs, extract_patches, get_inverted_pyr_index, denormalizeLAFs, extract_patches_from_pyramid_with_inv_index, rectifyAffineTransformationUpIsUp
 from HandCraftedModules import HessianResp, AffineShapeEstimator, OrientationDetector, ScalePyramid
 from NMS import NMS2d, NMS3dAndComposeA
 
@@ -43,6 +43,7 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
             self.AffNet = AffineShapeEstimator(patch_size = 19)
         self.ScalePyrGen = ScalePyramid(nScales = self.nlevels, init_sigma = self.init_sigma, border = self.b)
         return
+    
     def multiScaleDetector(self,x):
         scale_pyr, sigmas, pix_dists = self.ScalePyrGen(x)
         ### Detect keypoints in scale space
@@ -81,15 +82,14 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
         final_pyr_idxs = pyr_idxs_scales[idxs]
         final_level_idxs = level_idxs_scale[idxs]
         return final_resp, LAFs, final_pyr_idxs, final_level_idxs,scale_pyr
+    
     def getAffineShape(self,scale_pyr, final_resp, LAFs, final_pyr_idxs, final_level_idxs ):
         pyr_inv_idxs = get_inverted_pyr_index(scale_pyr, final_pyr_idxs, final_level_idxs)
-        #LAFs[:,0:2,0:2] =  LAFs[:,0:2,0:2] / self.init_sigma
         patches_small = extract_patches_from_pyramid_with_inv_index(scale_pyr, pyr_inv_idxs, LAFs, PS = self.AffNet.PS, use_cuda = self.use_cuda)
         ###
         base_A = Variable(torch.eye(2).unsqueeze(0).expand(final_pyr_idxs.size(0),2,2))
         if self.use_cuda:
             base_A = base_A.cuda()
-        ### Estimate affine shape
         for i in range(self.num_Baum_iters):
             #print i
             A = self.AffNet(patches_small)
@@ -97,16 +97,18 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
             temp_LAFs = torch.cat([torch.bmm(base_A,LAFs[:,:,0:2]), LAFs[:,:,2:] ], dim =2)
             if i != self.num_Baum_iters - 1:
                 patches_small =  extract_patches_from_pyramid_with_inv_index(scale_pyr, pyr_inv_idxs, temp_LAFs, PS = self.AffNet.PS, use_cuda = self.use_cuda)
-            else:
-                l1,l2 = batch_eig2x2(base_A)
-                ratio = torch.abs(l1 / (l2 + 1e-8))
-                idxs_mask = (ratio <= 6.0) * (ratio >= 1./6.)
-                idxs_mask = torch.nonzero(idxs_mask.data).view(-1)
-                temp_LAFs = temp_LAFs[idxs_mask, :, :]
-                final_resp = final_resp[idxs_mask]
-                final_pyr_idxs = final_pyr_idxs[idxs_mask]
-                final_level_idxs = final_level_idxs[idxs_mask]
+        l1,l2 = batch_eig2x2(base_A)
+        ratio = torch.abs(l1 / (l2 + 1e-8))
+        idxs_mask = (ratio <= 6.0) * (ratio >= 1./6.)
+        idxs_mask = torch.nonzero(idxs_mask.data).view(-1)
+        base_A = rectifyAffineTransformationUpIsUp(base_A)
+        temp_LAFs = torch.cat([torch.bmm(base_A, LAFs[:,:,0:2]), LAFs[:,:,2:] ], dim =2)
+        temp_LAFs = temp_LAFs[idxs_mask, :,:]
+        final_resp = final_resp[idxs_mask]
+        final_pyr_idxs = final_pyr_idxs[idxs_mask]
+        final_level_idxs = final_level_idxs[idxs_mask]
         return final_resp, temp_LAFs, final_pyr_idxs, final_level_idxs  
+    
     def getOrientation(self,scale_pyr, LAFs, final_pyr_idxs, final_level_idxs):
         pyr_inv_idxs = get_inverted_pyr_index(scale_pyr, final_pyr_idxs, final_level_idxs)
         patches_small =  extract_patches_from_pyramid_with_inv_index(scale_pyr, pyr_inv_idxs, LAFs, PS = self.OriNet.PS, use_cuda = self.use_cuda)
@@ -114,19 +116,18 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
         ### Detect orientation
         for i in range(max_iters):
             ori = self.OriNet(patches_small)
-            #print np.degrees(ori.data.cpu().numpy().ravel()[1])
             LAFs = self.rotateLAFs(LAFs, ori)
             if i != max_iters:
                 patches_small = extract_patches_from_pyramid_with_inv_index(scale_pyr, pyr_inv_idxs, LAFs, PS = self.OriNet.PS, use_cuda = self.use_cuda)        
         return LAFs
+    
     def forward(self,x):
         ### Detection
         final_resp, LAFs, final_pyr_idxs, final_level_idxs,scale_pyr = self.multiScaleDetector(x)
-        final_resp, LAFs, final_pyr_idxs, final_level_idxs  = self.getAffineShape(scale_pyr, final_resp, LAFs, final_pyr_idxs, final_level_idxs)
+        if self.num_Baum_iters > 0:
+            final_resp, LAFs, final_pyr_idxs, final_level_idxs  = self.getAffineShape(scale_pyr, final_resp, LAFs, final_pyr_idxs, final_level_idxs)
         LAFs[:,:,0:2] = self.mrSize * LAFs[:,:,0:2]
         LAFs = self.getOrientation(scale_pyr, LAFs, final_pyr_idxs, final_level_idxs)
-        
-        
         pyr_inv_idxs = get_inverted_pyr_index(scale_pyr, final_pyr_idxs, final_level_idxs)
         patches = extract_patches_from_pyramid_with_inv_index(scale_pyr, pyr_inv_idxs, LAFs, PS = self.PS, use_cuda = self.use_cuda)
         return LAFs,patches,final_resp,scale_pyr

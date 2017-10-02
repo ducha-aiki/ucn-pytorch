@@ -110,7 +110,7 @@ class GaussianBlur(nn.Module):
         w = Variable(self.buf)
         if self.use_cuda:
             w=w.cuda()
-        return F.conv2d(x, w, padding = self.pad)
+        return F.conv2d(F.pad(x, (self.pad,self.pad,self.pad,self.pad), 'replicate'), w, padding = 0)
 
 def batch_eig2x2(A):
     trace = A[:,0,0] + A[:,1,1]
