@@ -61,21 +61,16 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
             high = None
             octaveMap = (scale_pyr[oct_idx][0] * 0).byte()
             for level_idx in range(1, len(octave)-1):
-                if cur is not None:
-                    low = cur
-                else:
-                    low = self.RespNet(octave[level_idx - 1], (sigmas_oct[level_idx - 1 ]))
-                if high is not None:
-                    cur = high
-                else:
-                    cur = self.RespNet(octave[level_idx ], (sigmas_oct[level_idx ]))
+                low = self.RespNet(octave[level_idx - 1], (sigmas_oct[level_idx - 1 ]))
+                cur = self.RespNet(octave[level_idx ], (sigmas_oct[level_idx ]))
                 high = self.RespNet(octave[level_idx + 1], (sigmas_oct[level_idx + 1 ]))
                 #
                 nms_f = NMS3dAndComposeA(scales = sigmas_oct[level_idx - 1:level_idx + 2],
                                         border = self.b, mrSize = self.mrSize, use_cuda = self.use_cuda)
-                top_resp, aff_matrix, octaveMap  = nms_f(low, cur, high, octaveMap)
+                top_resp, aff_matrix, octaveMap_current  = nms_f(low, cur, high, octaveMap)
                 if top_resp is None:
-                    break
+                    continue
+                octaveMap =  octaveMap_current
                 aff_matrices.append(aff_matrix), top_responces.append(top_resp)
                 pyr_id = Variable(oct_idx * torch.ones(aff_matrix.size(0)))
                 lev_id = Variable(level_idx * torch.ones(aff_matrix.size(0)))
