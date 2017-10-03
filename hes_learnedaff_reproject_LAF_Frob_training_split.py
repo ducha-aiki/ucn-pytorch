@@ -17,7 +17,7 @@ import torch.backends.cudnn as cudnn
 import torch.optim as optim
 from tqdm import tqdm
 
-USE_CUDA = False
+USE_CUDA = True
 
 LOG_DIR = 'log_snaps'
 BASE_LR = 0.01
@@ -104,14 +104,14 @@ def create_loaders(load_random_triplets = False):
     #        transforms.Normalize((args.mean_image,), (args.std_image,))])
 
     train_loader = torch.utils.data.DataLoader(
-            dset.HPatchesSeq('/home/old-ufo/dev/LearnedDetector/dataset', 'a',
-                             train=True, transform=None, 
+            dset.HPatchesSeq('/home/old-ufo/storage/learned_detector/dataset/', 'b',
+                             train=True, transform=None,
                              download=True), batch_size = 1,
         shuffle = True, **kwargs)
 
     test_loader = torch.utils.data.DataLoader(
-            dset.HPatchesSeq('/home/old-ufo/dev/LearnedDetector/dataset', 'a',
-                             train=False, transform=None, 
+            dset.HPatchesSeq('/home/old-ufo/storage/learned_detector/dataset/', 'b',
+                             train=False, transform=None,
                              download=True), batch_size = 1,
         shuffle = False, **kwargs)
 
@@ -143,7 +143,9 @@ def train(train_loader, model, optimizer, epoch, cuda = True):
             img1, img2, H = img1.cuda(), img2.cuda(), H.cuda()
         img1, img2, H = Variable(img1, requires_grad = False), Variable(img2, requires_grad = False), Variable(H, requires_grad = False)
         LAFs1, aff_norm_patches1, resp1, pyr1 = HA(img1 / 255.)
+        LAFs1 = denormalizeLAFs(LAFs1, img1.size(3), img1.size(2), use_cuda = USE_CUDA)
         LAFs2, aff_norm_patches2, resp2, pyr2 = HA(img2 / 255.)
+        LAFs2 = denormalizeLAFs(LAFs2, img2.size(3), img2.size(2), use_cuda = USE_CUDA)
         if (len(LAFs1) == 0) or (len(LAFs2) == 0):
             optimizer.zero_grad()
             continue
@@ -169,7 +171,7 @@ def test(test_loader, model, cuda = True):
     # switch to train mode
     model.eval()
     log_interval = 1
-    pbar = enumerate(train_loader)
+    pbar = enumerate(test_loader)
     total_loss = 0
     for batch_idx, data in pbar:
         print 'Batch idx', batch_idx
@@ -184,7 +186,9 @@ def test(test_loader, model, cuda = True):
             img1, img2, H = img1.cuda(), img2.cuda(), H.cuda()
         img1, img2, H = Variable(img1, volatile = True), Variable(img2, volatile = True), Variable(H, volatile = True)
         LAFs1, aff_norm_patches1, resp1, pyr1 = HA(img1 / 255.)
+        LAFs1 = denormalizeLAFs(LAFs1, img1.size(3), img1.size(2), use_cuda = USE_CUDA)
         LAFs2, aff_norm_patches2, resp2, pyr2 = HA(img2 / 255.)
+        LAFs2 = denormalizeLAFs(LAFs2, img2.size(3), img2.size(2), use_cuda = USE_CUDA)
         if (len(LAFs1) == 0) or (len(LAFs2) == 0):
             continue
         fro_dists, idxs_in1, idxs_in2 = get_GT_correspondence_indexes_Fro(LAFs1, LAFs2, H, dist_threshold = 10, use_cuda = cuda);
@@ -198,7 +202,7 @@ def test(test_loader, model, cuda = True):
 
 train_loader, test_loader = create_loaders()
 
-HA = ScaleSpaceAffinePatchExtractor( mrSize = 5.0, num_features = 3000, border = 5, num_Baum_iters = 10, AffNet = BaumNet())
+HA = ScaleSpaceAffinePatchExtractor( mrSize = 3.0, num_features = 750, border = 5, num_Baum_iters = 1, AffNet = BaumNet(), use_cuda = USE_CUDA)
 
 
 model = HA

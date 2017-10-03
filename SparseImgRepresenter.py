@@ -36,12 +36,12 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
         if OriNet is not None:
             self.OriNet = OriNet
         else:
-            self.OriNet= OrientationDetector(patch_size = 19);
+            self.OriNet= OrientationDetector(patch_size = 19, use_cuda = self.use_cuda);
         if AffNet is not None:
             self.AffNet = AffNet
         else:
-            self.AffNet = AffineShapeEstimator(patch_size = 19)
-        self.ScalePyrGen = ScalePyramid(nLevels = self.nlevels, init_sigma = self.init_sigma, border = self.b)
+            self.AffNet = AffineShapeEstimator(patch_size = 19, use_cuda = self.use_cuda)
+        self.ScalePyrGen = ScalePyramid(nScales = self.nlevels, init_sigma = self.init_sigma, border = self.b, use_cuda = use_cuda)
         return
     
     def multiScaleDetector(self,x, num_features = 0):
@@ -73,7 +73,6 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
                 #
                 nms_f = NMS3dAndComposeA(scales = sigmas_oct[level_idx - 1:level_idx + 2],
                                         border = self.b, mrSize = self.mrSize)
-                #
                 top_resp, aff_matrix, octaveMap  = nms_f(low, cur, high, octaveMap)
                 if top_resp is None:
                     break
@@ -139,11 +138,12 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
     def getOrientation(self,scale_pyr, LAFs, final_pyr_idxs, final_level_idxs):
         pyr_inv_idxs = get_inverted_pyr_index(scale_pyr, final_pyr_idxs, final_level_idxs)
         patches_small =  extract_patches_from_pyramid_with_inv_index(scale_pyr, pyr_inv_idxs, LAFs, PS = self.OriNet.PS, use_cuda = self.use_cuda)
-        max_iters = 0
+        max_iters = 1
         ### Detect orientation
         for i in range(max_iters):
-            ori = self.OriNet(patches_small)
-            LAFs = self.rotateLAFs(LAFs, ori)
+            angles = self.OriNet(patches_small)
+            #print np.degrees(ori.data.cpu().numpy().ravel()[1])
+            LAFs = torch.cat([torch.bmm(angles2A(angles), LAFs[:,:,:2]), LAFs[:,:,2:]], dim = 2)
             if i != max_iters:
                 patches_small = extract_patches_from_pyramid_with_inv_index(scale_pyr, pyr_inv_idxs, LAFs, PS = self.OriNet.PS, use_cuda = self.use_cuda)        
         return LAFs
