@@ -57,7 +57,7 @@ class NMS3dAndComposeA(nn.Module):
             self.grid = self.grid.cuda()
             self.grid_ones = self.grid_ones.cuda()
         return
-    def forward(self, low, cur, high, num_feats = 500, octaveMap = None):
+    def forward(self, low, cur, high, octaveMap = None):
         assert low.size() == cur.size() == high.size()
         spatial_grid = Variable(generate_2dgrid(low.size(2), low.size(3), False)).view(1,low.size(2), low.size(3),2)
         spatial_grid = spatial_grid.permute(3,1, 2, 0)
@@ -71,6 +71,7 @@ class NMS3dAndComposeA(nn.Module):
             nmsed_resp = zero_response_at_border(self.NMS3d(resp3d.unsqueeze(1)).squeeze(1)[:,1:2,:,:], mrSize_border) * (1. - octaveMap.float())
         else:
             nmsed_resp = zero_response_at_border(self.NMS3d(resp3d.unsqueeze(1)).squeeze(1)[:,1:2,:,:], mrSize_border)
+        
         num_of_responces = (nmsed_resp > 0).sum().data[0]
         
         if (num_of_responces == 0):
@@ -78,40 +79,37 @@ class NMS3dAndComposeA(nn.Module):
                 return None,None,None
             else:
                 return None,None
-        
+        if octaveMap is not None:
+            octaveMap = (octaveMap.float() + nmsed_resp.float()).byte()
         #residual_to_patch_center
-        softargmax3d = F.conv2d(resp3d,
+        sc_y_x = F.conv2d(resp3d,
                                 self.grid,
                                 padding = 1) / (F.conv2d(resp3d, self.grid_ones, padding = 1) + 1e-8)
         
         ##maxima coords
-        softargmax3d[0,1:,:,:] = softargmax3d[0,1:,:,:] + spatial_grid[:,:,:,0]
-        sc_y_x = softargmax3d.view(3,-1).t()
+        sc_y_x[0,1:,:,:] = sc_y_x[0,1:,:,:] + spatial_grid[:,:,:,0]
         
-
+        sc_y_x = sc_y_x.view(3,-1).t()
         
         nmsed_resp_flat = nmsed_resp.view(-1)
-        topk_val, idxs = torch.topk(nmsed_resp_flat, 
-                                    k = max(1, min(int(num_feats), num_of_responces)));
+        idxs = nmsed_resp_flat.data.nonzero().squeeze()
+        nmsed_resp_flat = nmsed_resp_flat[idxs]
+        sc_y_x = sc_y_x[idxs,:]
         
-        if octaveMap is not None:
-            octaveMap = (octaveMap.float() + (nmsed_resp >= topk_val.min()).float()).byte()
-        
-        sc_y_x_topk = sc_y_x[idxs.data,:]
         min_size = float(min((cur.size(2)), cur.size(3)))
         
-        sc_y_x_topk[:,0] = sc_y_x_topk[:,0] / min_size
-        sc_y_x_topk[:,1] = sc_y_x_topk[:,1] / float(cur.size(2))
-        sc_y_x_topk[:,2] = sc_y_x_topk[:,2] / float(cur.size(3))
+        sc_y_x[:,0] = sc_y_x[:,0] / min_size
+        sc_y_x[:,1] = sc_y_x[:,1] / float(cur.size(2))
+        sc_y_x[:,2] = sc_y_x[:,2] / float(cur.size(3))
         
-        base_A = Variable(torch.eye(2).float().unsqueeze(0).expand(idxs.size(0),2,2), requires_grad=False)
+        base_A = Variable(torch.eye(2).float().unsqueeze(0).expand(sc_y_x.size(0),2,2), requires_grad=False)
         if self.use_cuda:
             base_A = base_A.cuda()
-        A = sc_y_x_topk[:,:1].unsqueeze(1).expand_as(base_A) * base_A
+        A = sc_y_x[:,:1].unsqueeze(1).expand_as(base_A) * base_A
         full_A  = torch.cat([A,
-                             torch.cat([sc_y_x_topk[:,2:].unsqueeze(-1),
-                                        sc_y_x_topk[:,1:2].unsqueeze(-1)], dim=1)], dim = 2)
+                             torch.cat([sc_y_x[:,2:].unsqueeze(-1),
+                                        sc_y_x[:,1:2].unsqueeze(-1)], dim=1)], dim = 2)
         if octaveMap is None:
-            return topk_val, full_A
+            return nmsed_resp_flat, full_A
         else:
-            return topk_val, full_A, octaveMap
+            return nmsed_resp_flat, full_A, octaveMap

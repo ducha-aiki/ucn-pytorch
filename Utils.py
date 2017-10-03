@@ -42,18 +42,17 @@ def CircularGaussKernel(kernlen=None, circ_zeros = False, sigma = None, norm = T
         kernlen = int(2.0 * 3.0 * sigma + 1.0)
         if (kernlen % 2 == 0):
             kernlen = kernlen + 1;
-        halfSize = float(kernlen) / 2.;
-    else:
         halfSize = kernlen / 2;
+    halfSize = kernlen / 2;
     r2 = float(halfSize*halfSize)
     if sigma is None:
         sigma2 = 0.9 * r2;
         sigma = np.sqrt(sigma2)
     else:
-        sigma2 = sigma * sigma    
-    x = np.linspace(0,kernlen-1,kernlen)
+        sigma2 = 2.0 * sigma * sigma    
+    x = np.linspace(-halfSize,halfSize,kernlen)
     xv, yv = np.meshgrid(x, x, sparse=False, indexing='xy')
-    distsq = (xv - halfSize)**2 + (yv - halfSize)**2
+    distsq = (xv)**2 + (yv)**2
     kernel = np.exp(-( distsq/ (sigma2)))
     if circ_zeros:
         kernel *= (distsq <= r2).astype(np.float32)
@@ -119,8 +118,8 @@ def batch_eig2x2(A):
     delta1 = (trace*trace - 4 * ( A[:,0,0]*  A[:,1,1] -  A[:,1,0]* A[:,0,1]))
     mask = delta1 > 0
     delta = torch.sqrt(torch.abs(delta1))
-    l1 = mask.float() * (trace + delta) / 2.0 +  100.  * (1 - mask.float())
-    l2 = mask.float() * (trace - delta) / 2.0 +  0.001  * (1 - mask.float())
+    l1 = mask.float() * (trace + delta) / 2.0 +  1000.  * (1.0 - mask.float())
+    l2 = mask.float() * (trace - delta) / 2.0 +  0.0001  * (1.0 - mask.float())
     return l1,l2
 
 def line_prepender(filename, line):

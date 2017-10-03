@@ -8,20 +8,21 @@ from Utils import CircularGaussKernel, GaussianBlur
 from LAF import abc2A,rectifyAffineTransformationUpIsUp
 
 class ScalePyramid(nn.Module):
-    def __init__(self, nLevels = 5, init_sigma = 1.6, border = 5, use_cuda = False):
+    def __init__(self, nLevels = 3, init_sigma = 1.6, border = 5, use_cuda = False):
         super(ScalePyramid,self).__init__()
         self.nLevels = nLevels;
         self.init_sigma = init_sigma
         self.sigmaStep =  2 ** (1. / float(self.nLevels))
+        #print 'step',self.sigmaStep
         self.b = border
-        self.minSize = 2 * self.b + 2;
+        self.minSize = 2 * self.b + 2 + 1;
         self.use_cuda = use_cuda;
         return
     def forward(self,x):
         pixelDistance = 1.0;
         curSigma = 0.5
         if self.init_sigma > curSigma:
-            sigma = np.sqrt(self.init_sigma**2 - curSigma**2 + 1e-8)
+            sigma = np.sqrt(self.init_sigma**2 - curSigma**2)
             curSigma = self.init_sigma
             curr = GaussianBlur(sigma = sigma, use_cuda = self.use_cuda)(x)
         else:
@@ -30,19 +31,22 @@ class ScalePyramid(nn.Module):
         pixel_dists = [[1.0]]
         pyr = [[curr]]
         while True:
-            for i in range(1,self.nLevels):
-                sigma = curSigma * np.sqrt(self.sigmaStep*self.sigmaStep - 1.0 + 1e-8)
+            curr = pyr[-1][0]
+            for i in range(1, self.nLevels + 2):
+                sigma = curSigma * np.sqrt(self.sigmaStep*self.sigmaStep - 1.0 )
+                #print 'blur sigma', sigma
                 curr = GaussianBlur(sigma = sigma, use_cuda = self.use_cuda)(curr)
                 curSigma *= self.sigmaStep
                 pyr[-1].append(curr)
                 sigmas[-1].append(curSigma)
                 pixel_dists[-1].append(pixelDistance)
+                if i == self.nLevels:
+                    nextOctaveFirstLevel = F.avg_pool2d(curr, kernel_size = 1, stride = 2, padding = 0) 
             pixelDistance = pixelDistance * 2.0
-            curr = F.avg_pool2d(curr, kernel_size = 1, stride = 2, padding = 0) 
             curSigma = self.init_sigma
-            if (curr[0,0,:,:].size(0) <= self.minSize) or (curr[0,0,:,:].size(1) <= self.minSize):
+            if (nextOctaveFirstLevel[0,0,:,:].size(0)  <= self.minSize) or (nextOctaveFirstLevel[0,0,:,:].size(1) <= self.minSize):
                 break
-            pyr.append([curr])
+            pyr.append([nextOctaveFirstLevel])
             sigmas.append([curSigma])
             pixel_dists.append([pixelDistance])
         return pyr, sigmas, pixel_dists
@@ -78,46 +82,29 @@ class AffineShapeEstimator(nn.Module):
         self.use_cuda = use_cuda;
         self.PS = patch_size
         self.gx =  nn.Conv2d(1, 1, kernel_size=(1,3), bias = False)
-        self.gx.weight.data = torch.from_numpy(np.array([[[[0.5, 0, -0.5]]]], dtype=np.float32))
+        self.gx.weight.data = torch.from_numpy(np.array([[[[-1, 0, 1]]]], dtype=np.float32))
         
         self.gy =  nn.Conv2d(1, 1, kernel_size=(3,1), bias = False)
-        self.gy.weight.data = torch.from_numpy(np.array([[[[0.5], [0], [-0.5]]]], dtype=np.float32))
+        self.gy.weight.data = torch.from_numpy(np.array([[[[-1], [0], [1]]]], dtype=np.float32))
         
         self.gk = torch.from_numpy(CircularGaussKernel(kernlen=patch_size, circ_zeros = False).astype(np.float32))
         self.gk = Variable(self.gk, requires_grad=False)
         if use_cuda:
             self.gk = self.gk.cuda()
         return
-    '''def BinvSqrt2(self, M):
-        s = torch.sqrt(M[:,0,0] * M[:,1,1] - M[:,1,0]*M[:,0,1])
-        t = torch.sqrt(M[:,0,0] + M[:,1,1] + 2.*s)
-        if self.use_cuda:
-            R = (1.0 / t.unsqueeze(-1).unsqueeze(-1).expand(M.size(0),2,2)) * (M + s.unsqueeze(-1).unsqueeze(-1).expand(M.size(0),2,2) * Variable(torch.eye(2).unsqueeze(0).expand(M.size(0),2,2).cuda()))
-        else:
-            R = (1.0 / t.unsqueeze(-1).unsqueeze(-1).expand(M.size(0),2,2)) * (M + s.unsqueeze(-1).unsqueeze(-1).expand(M.size(0),2,2) * Variable(torch.eye(2).unsqueeze(0).expand(M.size(0),2,2)))
-        return R
-    def forward(self, x):
-        gx = self.gx(x)
-        gy = self.gy(x)
-        a1 = (gx*gx * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
-        b1 = (gx*gy * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
-        c1 = (gy*gy * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
-        A = self.BinvSqrt2(abc2A(a1,b1,c1));
-        den = torch.sqrt(torch.abs(A[:,0,0]*A[:,1,1] - A[:,1,0]*A[:,0,1])) + 1e-12
-        A = A / den.unsqueeze(-1).unsqueeze(-1).expand(A.size(0), 2,2)
-        return A'''
     def invSqrt(self,a,b,c):
-        eps = 1e-10
-        r1 = (b != 0).float() * (c - a) / (2. * b + eps)
+        eps = 1e-12
+        mask = (b != 0).float()
+        r1 = mask * (c - a) / (2. * b + eps)
         t1 = torch.sign(r1) / (torch.abs(r1) + torch.sqrt(1. + r1*r1));
         r = 1.0 / torch.sqrt( 1. + t1*t1)
         t = t1*r;
         
-        r = r * (b != 0).float() + 1.0 * (b == 0).float();
-        t = t * (b != 0).float() + 0. * (b == 0).float();
+        r = r * mask + 1.0 * (1.0 - mask);
+        t = t * mask;
         
-        x = 1. / torch.sqrt( r*r*a - 2*r*t*b + t*t*c + eps)
-        z = 1. / torch.sqrt( t*t*a + 2*r*t*b + r*r*c + eps)
+        x = 1. / torch.sqrt( r*r*a - 2*r*t*b + t*t*c)
+        z = 1. / torch.sqrt( t*t*a + 2*r*t*b + r*r*c)
         
         d = torch.sqrt( x * z)
         
@@ -138,17 +125,15 @@ class AffineShapeEstimator(nn.Module):
         a1 = (gx*gx * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
         b1 = (gx*gy * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
         c1 = (gy*gy * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
-        l1,l2,a, b, c = self.invSqrt(a1,b1,c1)
-        #rat1 = l1/l2
-        den = torch.sqrt(torch.abs(a*c - b*b + 1e-10))
-        #mask = (rat1 <= 2).float().view(-1);
-        a = a / den# + 1. * (1.- mask)
-        b = b / den# + 0. * (1.- mask)
-        c = c / den# + 1. * (1.- mask)
+        l1, l2, a, b, c = self.invSqrt(a1,b1,c1)
+        rat1 = l1/l2
+        mask = (torch.abs(rat1) <= 6.).float().view(-1);
+        a = a * mask + 1. * (1.- mask)
+        b = b * mask + 0. * (1.- mask)
+        c = c * mask + 1. * (1.- mask)
         return torch.cat([torch.cat([a.unsqueeze(-1).unsqueeze(-1), b.unsqueeze(-1).unsqueeze(-1)], dim = 2),
                                         torch.cat([b.unsqueeze(-1).unsqueeze(-1), c.unsqueeze(-1).unsqueeze(-1)], dim = 2)],
-                                        dim = 1)
-        #return a.view(-1,1,1),b.view(-1,1,1),c.view(-1,1,1), rat1'''
+                                        dim = 1), mask
         
 
 class OrientationDetector(nn.Module):

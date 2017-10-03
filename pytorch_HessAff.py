@@ -41,12 +41,10 @@ var_image = torch.autograd.Variable(torch.from_numpy(img.astype(np.float32)))
 var_image_reshape = var_image.view(1, 1, var_image.size(0),var_image.size(1))
 
     
-HA = ScaleSpaceAffinePatchExtractor( mrSize = 1.0, num_features = nfeats, border = 5, num_Baum_iters = 0)
+HA = ScaleSpaceAffinePatchExtractor( mrSize = 1.7, num_features = nfeats, border = 5, num_Baum_iters = 16)
 
-LAFs, patches, resp, pyr = HA(var_image_reshape / 255.)
-LAFs = denormalizeLAFs(LAFs, img.shape[1], img.shape[0], use_cuda = USE_CUDA).data.cpu().numpy()
-
-ells = LAFs2ell(LAFs)
+LAFs, patches, resp, pyr = HA(var_image_reshape)
+ells = LAFs2ell(LAFs.data.cpu().numpy())
 
 np.savetxt(output_fname, ells, delimiter=' ', fmt='%10.10f')
 #line_prepender(output_fname, str(len(ells)))

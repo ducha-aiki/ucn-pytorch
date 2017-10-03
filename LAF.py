@@ -15,11 +15,28 @@ def Ell2LAF(ell):
     c = ell[4]
     C = np.array([[a, b], [b, c]])
     sc = np.sqrt(a*c - b*b)
-    A23[0:2,0:2] = sqrtm(C)[::-1,::-1] / sc
-    A23[1,0] = -A23[1,0]
-    A23[0,1] = 0
+    A = sqrtm(C) / sc
+    sc = np.sqrt(A[0,0] * A[1,1] - A[1,0] * A[0,1])
+    A23[0:2,0:2] = rectifyAffineTransformationUpIsUp_np(A / sc) * sc
     return A23
 
+def rectifyAffineTransformationUpIsUp_np(A):
+    det = np.sqrt(np.abs(A[0,0]*A[1,1] - A[1,0]*A[0,1] + 1e-10))
+    b2a2 = np.sqrt(A[0,1] * A[0,1] + A[0,0] * A[0,0])
+    A_new = np.zeros((2,2))
+    A_new[0,0] = b2a2 / det
+    A_new[0,1] = 0
+    A_new[1,0] = (A[1,1]*A[0,1]+A[1,0]*A[0,0])/(b2a2*det)
+    A_new[1,1] = det / b2a2
+    return A_new
+
+def rectifyAffineTransformationUpIsUp(A):
+    det = torch.sqrt(torch.abs(A[:,0,0]*A[:,1,1] - A[:,1,0]*A[:,0,1] + 1e-10))
+    b2a2 = torch.sqrt(A[:,0,1] * A[:,0,1] + A[:,0,0] * A[:,0,0])
+    A1_ell = torch.cat([(b2a2 / det).contiguous().view(-1,1,1), 0 * det.view(-1,1,1)], dim = 2)
+    A2_ell = torch.cat([-((A[:,1,1]*A[:,0,1]+A[:,1,0]*A[:,0,0])/(b2a2*det)).contiguous().view(-1,1,1), ######!!!!!!!!!!!!!!!Have no idea why
+                        (det / b2a2).contiguous().view(-1,1,1)], dim = 2)
+    return torch.cat([A1_ell, A2_ell], dim = 1)
 
 def ells2LAFs(ells):
     LAFs = np.zeros((len(ells), 2,3))
@@ -29,11 +46,11 @@ def ells2LAFs(ells):
 
 def LAF2pts(LAF, n_pts = 50):
     a = np.linspace(0, 2*np.pi, n_pts);
-    x = list(np.cos(a))
-    x.append(0)
+    x = [0]
+    x.extend(list(np.sin(a)))
     x = np.array(x).reshape(1,-1)
-    y = list(np.sin(a))
-    y.append(0)
+    y = [0]
+    y.extend(list(np.cos(a)))
     y = np.array(y).reshape(1,-1)
     HLAF = np.concatenate([LAF, np.array([0,0,1]).reshape(1,3)])
     H_pts =np.concatenate([x,y,np.ones(x.shape)])
@@ -42,17 +59,13 @@ def LAF2pts(LAF, n_pts = 50):
     H_pts_out[:,1] = H_pts_out[:,1] / H_pts_out[:, 2]
     return H_pts_out[:,0:2]
 
+
 def abc2A(a,b,c, normalize = False):
     A1_ell = torch.cat([a.view(-1,1,1), b.view(-1,1,1)], dim = 2)
     A2_ell = torch.cat([b.view(-1,1,1), c.view(-1,1,1)], dim = 2)
     return torch.cat([A1_ell, A2_ell], dim = 1)
 
-def rectifyAffineTransformationUpIsUp(A):
-    det = torch.sqrt(torch.abs(A[:,0,0]*A[:,1,1] - A[:,1,0]*A[:,0,1] + 1e-10))
-    b2a2 = torch.sqrt(A[:,0,1] * A[:,0,1] + A[:,0,0] * A[:,0,0])
-    A1_ell = torch.cat([(b2a2 / det).contiguous().view(-1,1,1), 0 * A[:,1,1].contiguous().view(-1,1,1)], dim = 2)
-    A2_ell = torch.cat([((A[:,1,1]*A[:,0,1]+A[:,1,0]*A[:,0,0])/(b2a2*det)).contiguous().view(-1,1,1), (det / b2a2).contiguous().view(-1,1,1)], dim = 2)
-    return torch.cat([A1_ell, A2_ell], dim = 1)
+
 
 def angles2A(angles):
     cos_a = torch.cos(angles).view(-1, 1, 1)
