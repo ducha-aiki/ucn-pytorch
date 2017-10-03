@@ -72,7 +72,7 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
                 high = self.RespNet(octave[level_idx + 1], (sigmas_oct[level_idx + 1 ]))
                 #
                 nms_f = NMS3dAndComposeA(scales = sigmas_oct[level_idx - 1:level_idx + 2],
-                                        border = self.b, mrSize = self.mrSize)
+                                        border = self.b, mrSize = self.mrSize, use_cuda = self.use_cuda)
                 top_resp, aff_matrix, octaveMap  = nms_f(low, cur, high, octaveMap)
                 if top_resp is None:
                     break
