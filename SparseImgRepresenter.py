@@ -102,33 +102,32 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
         pyr_inv_idxs = get_inverted_pyr_index(scale_pyr, final_pyr_idxs, final_level_idxs)
         patches_small = extract_patches_from_pyramid_with_inv_index(scale_pyr, pyr_inv_idxs, LAFs, PS = self.AffNet.PS, use_cuda = self.use_cuda)
         base_A = Variable(torch.eye(2).unsqueeze(0).expand(final_pyr_idxs.size(0),2,2))
+        is_good = None
         if self.use_cuda:
             base_A = base_A.cuda()
         for i in range(self.num_Baum_iters):
-            A, is_good = self.AffNet(patches_small)
-            #print 'A', A[60,:,:]
+            A, is_good_current = self.AffNet(patches_small)
+            l1,l2 = batch_eig2x2(A)      
+            if is_good is None:
+                is_good = is_good_current
+            else:
+                is_good = is_good * is_good_current
             base_A = torch.bmm(A, base_A); 
-            #print 'base_A', base_A[60,:,:]
             temp_LAFs = torch.cat([torch.bmm(base_A,LAFs[:,:,0:2]), LAFs[:,:,2:] ], dim =2)
             if i != self.num_Baum_iters - 1:
                 patches_small =  extract_patches_from_pyramid_with_inv_index(scale_pyr, pyr_inv_idxs, temp_LAFs, PS = self.AffNet.PS, use_cuda = self.use_cuda)
         l1,l2 = batch_eig2x2(base_A)
         ratio = torch.abs(l1 / (l2 + 1e-8))
-        idxs_mask = (ratio <= 6.0) * (ratio >= (1./6.)) * (is_good > 0.5)
+        idxs_mask = (ratio < 6.0) * (ratio > (1./6.)) * (is_good > 0.5)
         idxs_mask = torch.nonzero(idxs_mask.data).view(-1)
         
         final_resp = final_resp[idxs_mask]
         final_pyr_idxs = final_pyr_idxs[idxs_mask]
         final_level_idxs = final_level_idxs[idxs_mask]
-        #sc = torch.sqrt(torch.abs(base_A[:,0,0]*base_A[:,1,1] - base_A[:,1,0] * base_A[:,0,1])).unsqueeze(1).unsqueeze(1).expand(base_A.size(0),2,2)
         base_A = base_A[idxs_mask,:,:]
         LAFs = LAFs[idxs_mask,:,:]
         temp_LAFs = torch.cat([torch.bmm(rectifyAffineTransformationUpIsUp(base_A), LAFs[:,:,0:2]),
                                LAFs[:,:,2:]], dim =2)
-        #temp_LAFs = torch.cat([torch.bmm(rectifyAffineTransformationUpIsUp(base_A), LAFs[:,:,0:2]),
-        #                       LAFs[:,:,2:]], dim =2)
-        #temp_LAFs = temp_LAFs[idxs_mask, :,:]
-        
         if num_features > 0:
             if len(idxs_mask) > num_features:
                 final_resp, idxs = torch.topk(final_resp, k = max(1, min(num_features, len(final_resp))));

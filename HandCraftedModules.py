@@ -128,9 +128,9 @@ class AffineShapeEstimator(nn.Module):
         l1, l2, a, b, c = self.invSqrt(a1,b1,c1)
         rat1 = l1/l2
         mask = (torch.abs(rat1) <= 6.).float().view(-1);
-        a = a * mask + 1. * (1.- mask)
-        b = b * mask + 0. * (1.- mask)
-        c = c * mask + 1. * (1.- mask)
+        #a = a * mask + 1. * (1.- mask)
+        #b = b * mask + 0. * (1.- mask)
+        #c = c * mask + 1. * (1.- mask)
         return torch.cat([torch.cat([a.unsqueeze(-1).unsqueeze(-1), b.unsqueeze(-1).unsqueeze(-1)], dim = 2),
                                         torch.cat([b.unsqueeze(-1).unsqueeze(-1), c.unsqueeze(-1).unsqueeze(-1)], dim = 2)],
                                         dim = 1), mask

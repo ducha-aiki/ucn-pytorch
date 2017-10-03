@@ -63,7 +63,7 @@ class BaumNet(nn.Module):
 
     def forward(self, input):
         abc = self.features(self.input_norm(input))
-        return abc2A(abc[:,0,:,:].contiguous() + 1. ,abc[:,1,:,:].contiguous() , abc[:,2,:,:].contiguous() + 1.)
+        return abc2A(abc[:,0,:,:].contiguous() + 1. ,abc[:,1,:,:].contiguous() , abc[:,2,:,:].contiguous() + 1.), 1.0
 
 def weights_init(m):
     if isinstance(m, nn.Conv2d):
@@ -198,7 +198,7 @@ def test(test_loader, model, cuda = True):
 
 train_loader, test_loader = create_loaders()
 
-HA = ScaleSpaceAffinePatchExtractor( mrSize = 5.0, num_features = 3000, border = 1, num_Baum_iters = 5, AffNet = BaumNet())
+HA = ScaleSpaceAffinePatchExtractor( mrSize = 5.0, num_features = 3000, border = 5, num_Baum_iters = 10, AffNet = BaumNet())
 
 
 model = HA

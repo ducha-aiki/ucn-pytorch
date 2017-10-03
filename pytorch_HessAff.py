@@ -41,7 +41,7 @@ var_image = torch.autograd.Variable(torch.from_numpy(img.astype(np.float32)))
 var_image_reshape = var_image.view(1, 1, var_image.size(0),var_image.size(1))
 
     
-HA = ScaleSpaceAffinePatchExtractor( mrSize = 1.7, num_features = nfeats, border = 5, num_Baum_iters = 16)
+HA = ScaleSpaceAffinePatchExtractor( mrSize = 5.192, num_features = nfeats, border = 5, num_Baum_iters = 16)
 
 LAFs, patches, resp, pyr = HA(var_image_reshape)
 ells = LAFs2ell(LAFs.data.cpu().numpy())

@@ -39,7 +39,7 @@ def Ell2LAF(ell):
     b = ell[3]
     c = ell[4]
     sc = np.sqrt(np.sqrt(a*c - b*b))
-    ia,ib,ic = invSqrt(a,b,c) 
+    ia,ib,ic = invSqrt(a,b,c)  #because sqrtm returns ::-1, ::-1 matrix, don`t know why 
     A = np.array([[ia, ib], [ib, ic]]) / sc
     sc = np.sqrt(A[0,0] * A[1,1] - A[1,0] * A[0,1])
     A23[0:2,0:2] = rectifyAffineTransformationUpIsUp(A / sc) * sc
@@ -59,7 +59,6 @@ def rectifyAffineTransformationUpIsUp(A):
     det = torch.sqrt(torch.abs(A[:,0,0]*A[:,1,1] - A[:,1,0]*A[:,0,1] + 1e-10))
     b2a2 = torch.sqrt(A[:,0,1] * A[:,0,1] + A[:,0,0] * A[:,0,0])
     A1_ell = torch.cat([(b2a2 / det).contiguous().view(-1,1,1), 0 * det.view(-1,1,1)], dim = 2)
-#    A2_ell = torch.cat([-((A[:,1,1]*A[:,0,1]+A[:,1,0]*A[:,0,0])/(b2a2*det)).contiguous().view(-1,1,1), ######!!!!!!!!!!!!!!!Have no idea why
     A2_ell = torch.cat([((A[:,1,1]*A[:,0,1]+A[:,1,0]*A[:,0,0])/(b2a2*det)).contiguous().view(-1,1,1),
                         (det / b2a2).contiguous().view(-1,1,1)], dim = 2)
     return torch.cat([A1_ell, A2_ell], dim = 1)
