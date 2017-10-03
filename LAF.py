@@ -6,6 +6,31 @@ from scipy.linalg import schur, sqrtm
 import torch
 from  torch.autograd import Variable
 
+def invSqrt(a,b,c):
+    eps = 1e-12 
+    mask = (b !=  0)
+    r1 = mask * (c - a) / (2. * b + eps)
+    t1 = np.sign(r1) / (np.abs(r1) + np.sqrt(1. + r1*r1));
+    r = 1.0 / np.sqrt( 1. + t1*t1)
+    t = t1*r;
+    
+    r = r * mask + 1.0 * (1.0 - mask);
+    t = t * mask;
+    
+    x = 1. / np.sqrt( r*r*a - 2*r*t*b + t*t*c)
+    z = 1. / np.sqrt( t*t*a + 2*r*t*b + r*r*c)
+    
+    d = np.sqrt( x * z)
+    
+    x = x / d
+    z = z / d
+       
+    new_a = r*r*x + t*t*z
+    new_b = -r*t*x + t*r*z
+    new_c = t*t*x + r*r *z
+
+    return new_a, new_b, new_c
+
 def Ell2LAF(ell):
     A23 = np.zeros((2,3))
     A23[0,2] = ell[0]
@@ -13,11 +38,11 @@ def Ell2LAF(ell):
     a = ell[2]
     b = ell[3]
     c = ell[4]
-    C = np.array([[a, b], [b, c]])
-    sc = np.sqrt(a*c - b*b)
-    A = sqrtm(C) / sc
+    sc = np.sqrt(np.sqrt(a*c - b*b))
+    ia,ib,ic = invSqrt(a,b,c) 
+    A = np.array([[ia, ib], [ib, ic]]) / sc
     sc = np.sqrt(A[0,0] * A[1,1] - A[1,0] * A[0,1])
-    A23[0:2,0:2] = rectifyAffineTransformationUpIsUp_np(A / sc) * sc
+    A23[0:2,0:2] = rectifyAffineTransformationUpIsUp(A / sc) * sc
     return A23
 
 def rectifyAffineTransformationUpIsUp_np(A):
@@ -34,7 +59,8 @@ def rectifyAffineTransformationUpIsUp(A):
     det = torch.sqrt(torch.abs(A[:,0,0]*A[:,1,1] - A[:,1,0]*A[:,0,1] + 1e-10))
     b2a2 = torch.sqrt(A[:,0,1] * A[:,0,1] + A[:,0,0] * A[:,0,0])
     A1_ell = torch.cat([(b2a2 / det).contiguous().view(-1,1,1), 0 * det.view(-1,1,1)], dim = 2)
-    A2_ell = torch.cat([-((A[:,1,1]*A[:,0,1]+A[:,1,0]*A[:,0,0])/(b2a2*det)).contiguous().view(-1,1,1), ######!!!!!!!!!!!!!!!Have no idea why
+#    A2_ell = torch.cat([-((A[:,1,1]*A[:,0,1]+A[:,1,0]*A[:,0,0])/(b2a2*det)).contiguous().view(-1,1,1), ######!!!!!!!!!!!!!!!Have no idea why
+    A2_ell = torch.cat([((A[:,1,1]*A[:,0,1]+A[:,1,0]*A[:,0,0])/(b2a2*det)).contiguous().view(-1,1,1),
                         (det / b2a2).contiguous().view(-1,1,1)], dim = 2)
     return torch.cat([A1_ell, A2_ell], dim = 1)
 
