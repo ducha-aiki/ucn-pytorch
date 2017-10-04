@@ -129,10 +129,10 @@ def train(train_loader, model, optimizer, epoch, cuda = True):
     for batch_idx, data in pbar:
         print 'Batch idx', batch_idx
         #print model.detector.shift_net[0].weight.data.cpu().numpy()
-        img1, img2, H  = data
+        img1, img2, H1to2  = data
         #if np.abs(np.sum(H.numpy()) - 3.0) > 0.01:
         #    continue
-        H = H.squeeze(0)
+        H1to2 = H1to2.squeeze(0)
         if (img1.size(3) *img1.size(4)   > 1340*1000):
             print img1.shape, ' too big, skipping'
             continue
@@ -143,14 +143,14 @@ def train(train_loader, model, optimizer, epoch, cuda = True):
         #img2 = img2 - img2.mean()
         #img2 = img2 / 50.#(img2.std() + 1e-8)
         if cuda:
-            img1, img2, H = img1.cuda(), img2.cuda(), H.cuda()
-        img1, img2, H = Variable(img1, requires_grad = False), Variable(img2, requires_grad = False), Variable(H, requires_grad = False)
-        LAFs1, aff_norm_patches1, resp1, pyr1 = HA(img1 / 255.)
-        LAFs2, aff_norm_patches2, resp2, pyr2 = HA(img2 / 255.)
+            img1, img2, H1to2 = img1.cuda(), img2.cuda(), H1to2.cuda()
+        img1, img2, H1to2 = Variable(img1, requires_grad = False), Variable(img2, requires_grad = False), Variable(H1to2, requires_grad = False)
+        LAFs1, aff_norm_patches1, resp1, pyr1 = HA(img1)
+        LAFs2, aff_norm_patches2, resp2, pyr2 = HA(img2)
         if (len(LAFs1) == 0) or (len(LAFs2) == 0):
             optimizer.zero_grad()
             continue
-        fro_dists, idxs_in1, idxs_in2 = get_GT_correspondence_indexes_Fro(LAFs1, LAFs2, H, dist_threshold = 10., use_cuda = cuda);
+        fro_dists, idxs_in1, idxs_in2 = get_GT_correspondence_indexes_Fro(LAFs1, LAFs2, H1to2, dist_threshold = 10., use_cuda = cuda);
         if  len(fro_dists.size()) == 0:
             optimizer.zero_grad()
             print 'skip'
@@ -176,21 +176,21 @@ def test(test_loader, model, cuda = True):
     total_loss = 0
     for batch_idx, data in pbar:
         print 'Batch idx', batch_idx
-        img1, img2, H  = data
+        img1, img2, H1to2  = data
         if (img1.size(3) *img1.size(4)   > 1500*1200):
             print img1.shape, ' too big, skipping'
             continue
-        H = H.squeeze(0)
+        H1to2 = H1to2.squeeze(0)
         img1 = img1.float().squeeze(0)
         img2 = img2.float().squeeze(0)
         if cuda:
-            img1, img2, H = img1.cuda(), img2.cuda(), H.cuda()
-        img1, img2, H = Variable(img1, volatile = True), Variable(img2, volatile = True), Variable(H, volatile = True)
-        LAFs1, aff_norm_patches1, resp1, pyr1 = HA(img1 / 255.)
-        LAFs2, aff_norm_patches2, resp2, pyr2 = HA(img2 / 255.)
+            img1, img2, H1to2 = img1.cuda(), img2.cuda(), H1to2.cuda()
+        img1, img2, H1to2 = Variable(img1, volatile = True), Variable(img2, volatile = True), Variable(H1to2, volatile = True)
+        LAFs1, aff_norm_patches1, resp1, pyr1 = HA(img1)
+        LAFs2, aff_norm_patches2, resp2, pyr2 = HA(img2)
         if (len(LAFs1) == 0) or (len(LAFs2) == 0):
             continue
-        fro_dists, idxs_in1, idxs_in2 = get_GT_correspondence_indexes_Fro(LAFs1, LAFs2, H, dist_threshold = 10, use_cuda = cuda);
+        fro_dists, idxs_in1, idxs_in2 = get_GT_correspondence_indexes_Fro(LAFs1, LAFs2, H1to2, dist_threshold = 10, use_cuda = cuda);
         if  len(fro_dists.size()) == 0:
             print 'skip'
             continue
