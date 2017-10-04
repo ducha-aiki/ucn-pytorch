@@ -12,6 +12,28 @@ cv2_scale = lambda x: cv2.resize(x, dsize=(32, 32),
 # reshape image
 np_reshape = lambda x: np.reshape(x, (32, 32, 1))
 
+def zeros_like(x):
+    assert x.__class__.__name__.find('Variable') != -1 or x.__class__.__name__.find('Tensor') != -1, "Object is neither a Tensor nor a Variable"
+    y = torch.zeros(x.size())
+    if x.is_cuda:
+       y = y.cuda()
+    if x.__class__.__name__ == 'Variable':
+        return torch.autograd.Variable(y, requires_grad=x.requires_grad)
+    elif x.__class__.__name__.find('Tensor') != -1:
+        return torch.zeros(y)
+
+def ones_like(x):
+    assert x.__class__.__name__.find('Variable') != -1 or x.__class__.__name__.find('Tensor') != -1, "Object is neither a Tensor nor a Variable"
+    y = torch.ones(x.size())
+    if x.is_cuda:
+       y = y.cuda()
+    if x.__class__.__name__ == 'Variable':
+        return torch.autograd.Variable(y, requires_grad=x.requires_grad)
+    elif x.__class__.__name__.find('Tensor') != -1:
+        return torch.ones(y)
+    
+
+
 class L2Norm(nn.Module):
     def __init__(self):
         super(L2Norm,self).__init__()
@@ -95,11 +117,10 @@ def zero_response_at_border(x, b):
     return x
 
 class GaussianBlur(nn.Module):
-    def __init__(self, sigma=1.6, use_cuda = False):
+    def __init__(self, sigma=1.6):
         super(GaussianBlur, self).__init__()
         weight = self.calculate_weights(sigma)
         self.register_buffer('buf', weight)
-        self.use_cuda = use_cuda
         return
     def calculate_weights(self,  sigma):
         kernel = CircularGaussKernel(sigma = sigma, circ_zeros = False)
@@ -109,8 +130,8 @@ class GaussianBlur(nn.Module):
         return torch.from_numpy(kernel.astype(np.float32)).view(1,1,h,w);
     def forward(self, x):
         w = Variable(self.buf)
-        if self.use_cuda:
-            w=w.cuda()
+        if x.is_cuda:
+            w = w.cuda()
         return F.conv2d(F.pad(x, (self.pad,self.pad,self.pad,self.pad), 'replicate'), w, padding = 0)
 
 def batch_eig2x2(A):

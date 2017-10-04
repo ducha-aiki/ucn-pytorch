@@ -21,9 +21,8 @@ from LAF import denormalizeLAFs, LAFs2ell
 from Utils import line_prepender
 
 
-LOG_DIR = 'log_snaps'
-BASE_LR = 0.00000001
-USE_CUDA = False
+
+USE_CUDA = True
 
 
 try:
@@ -41,9 +40,14 @@ var_image = torch.autograd.Variable(torch.from_numpy(img.astype(np.float32)))
 var_image_reshape = var_image.view(1, 1, var_image.size(0),var_image.size(1))
 
     
-HA = ScaleSpaceAffinePatchExtractor( mrSize = 5.192, num_features = nfeats, border = 5, num_Baum_iters = 16)
-
+HA = ScaleSpaceAffinePatchExtractor(mrSize = 5.192, num_features = nfeats, border = 5, num_Baum_iters = 16)
+if USE_CUDA:
+    HA = HA.cuda()
+    var_image_reshape = var_image_reshape.cuda()
+#HA.train()
 LAFs, patches, resp, pyr = HA(var_image_reshape)
+#loss = LAFs.mean()
+#loss.backward()
 ells = LAFs2ell(LAFs.data.cpu().numpy())
 
 np.savetxt(output_fname, ells, delimiter=' ', fmt='%10.10f')

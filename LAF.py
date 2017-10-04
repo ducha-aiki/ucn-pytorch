@@ -6,6 +6,7 @@ from scipy.linalg import schur, sqrtm
 import torch
 from  torch.autograd import Variable
 
+##########numpy
 def invSqrt(a,b,c):
     eps = 1e-12 
     mask = (b !=  0)
@@ -55,14 +56,6 @@ def rectifyAffineTransformationUpIsUp_np(A):
     A_new[1,1] = det / b2a2
     return A_new
 
-def rectifyAffineTransformationUpIsUp(A):
-    det = torch.sqrt(torch.abs(A[:,0,0]*A[:,1,1] - A[:,1,0]*A[:,0,1] + 1e-10))
-    b2a2 = torch.sqrt(A[:,0,1] * A[:,0,1] + A[:,0,0] * A[:,0,0])
-    A1_ell = torch.cat([(b2a2 / det).contiguous().view(-1,1,1), 0 * det.view(-1,1,1)], dim = 2)
-    A2_ell = torch.cat([((A[:,1,1]*A[:,0,1]+A[:,1,0]*A[:,0,0])/(b2a2*det)).contiguous().view(-1,1,1),
-                        (det / b2a2).contiguous().view(-1,1,1)], dim = 2)
-    return torch.cat([A1_ell, A2_ell], dim = 1)
-
 def ells2LAFs(ells):
     LAFs = np.zeros((len(ells), 2,3))
     for i in range(len(ells)):
@@ -85,98 +78,6 @@ def LAF2pts(LAF, n_pts = 50):
     return H_pts_out[:,0:2]
 
 
-def abc2A(a,b,c, normalize = False):
-    A1_ell = torch.cat([a.view(-1,1,1), b.view(-1,1,1)], dim = 2)
-    A2_ell = torch.cat([b.view(-1,1,1), c.view(-1,1,1)], dim = 2)
-    return torch.cat([A1_ell, A2_ell], dim = 1)
-
-
-
-def angles2A(angles):
-    cos_a = torch.cos(angles).view(-1, 1, 1)
-    sin_a = torch.sin(angles).view(-1, 1, 1)
-    A1_ang = torch.cat([cos_a, sin_a], dim = 2)
-    A2_ang = torch.cat([-sin_a, cos_a], dim = 2)
-    return  torch.cat([A1_ang, A2_ang], dim = 1)
-
-def generate_patch_grid_from_normalized_LAFs(LAFs, w, h, PS, use_cuda = False):
-    num_lafs = LAFs.size(0)
-    min_size = min(h,w)
-    coef = torch.ones(1,2,3) * 0.5  * min_size
-    coef[0,0,2] = w
-    coef[0,1,2] = h
-    if use_cuda:
-        coef = coef.cuda()
-    coef = Variable(coef.expand(num_lafs,2,3))
-    grid = torch.nn.functional.affine_grid(LAFs * coef, torch.Size((num_lafs,1,PS,PS)))
-    grid[:,:,:,0] = 2.0 * grid[:,:,:,0] / float(w)  - 1.0
-    grid[:,:,:,1] = 2.0 * grid[:,:,:,1] / float(h)  - 1.0     
-    return grid
-    
-def extract_patches(img, LAFs, PS = 32, use_cuda = False):
-    w = img.size(3)
-    h = img.size(2)
-    ch = img.size(1)
-    grid = generate_patch_grid_from_normalized_LAFs(LAFs, float(w),float(h), PS, use_cuda )
-    return torch.nn.functional.grid_sample(img.expand(grid.size(0), ch, h, w),  grid)  
-
-def extract_patches_from_pyramid_with_inv_index(scale_pyramid, pyr_inv_idxs, LAFs, PS = 19, use_cuda = False):
-    patches = torch.zeros(LAFs.size(0),scale_pyramid[0][0].size(1), PS, PS)
-    if use_cuda:
-        patches = patches.cuda()
-    patches = Variable(patches)
-    if pyr_inv_idxs is not None:
-        for i in range(len(scale_pyramid)):
-            for j in range(len(scale_pyramid[i])):
-                cur_lvl_idxs = pyr_inv_idxs[i][j]
-                if cur_lvl_idxs is None:
-                    continue
-                cur_lvl_idxs = cur_lvl_idxs.view(-1)
-                patches[cur_lvl_idxs,:,:,:] = extract_patches(scale_pyramid[i][j],LAFs[cur_lvl_idxs, :,:], PS, use_cuda )
-    return patches
-
-def get_inverted_pyr_index(scale_pyr, pyr_idxs, level_idxs):
-    pyr_inv_idxs = []
-    ### Precompute octave inverted indexes
-    for i in range(len(scale_pyr)):
-        pyr_inv_idxs.append([])
-        cur_idxs = pyr_idxs == i #torch.nonzero((pyr_idxs == i).data)
-        for j in range(0, len(level_idxs)):
-            cur_lvl_idxs = torch.nonzero(((level_idxs == j) * cur_idxs).data)
-            if len(cur_lvl_idxs.size()) == 0:
-                pyr_inv_idxs[-1].append(None)
-            else:
-                pyr_inv_idxs[-1].append(cur_lvl_idxs.squeeze(1))
-    return pyr_inv_idxs
-
-
-def denormalizeLAFs(LAFs, w, h, use_cuda = False):
-    w = float(w)
-    h = float(h)
-    num_lafs = LAFs.size(0)
-    min_size = min(h,w)
-    coef = torch.ones(1,2,3)  * min_size
-    coef[0,0,2] = w
-    coef[0,1,2] = h
-    if use_cuda:
-        coef = coef.cuda()
-    coef = Variable(coef.expand(num_lafs,2,3))
-    return coef * LAFs
-
-def normalizeLAFs(LAFs, w, h, use_cuda = False):
-    w = float(w)
-    h = float(h)
-    num_lafs = LAFs.size(0)
-    min_size = min(h,w)
-    coef = torch.ones(1,2,3).float()  / min_size
-    coef[0,0,2] = 1.0 / w
-    coef[0,1,2] = 1.0 / h
-    if use_cuda:
-        coef = coef.cuda()
-    coef = Variable(coef.expand(num_lafs,2,3))
-    return coef * LAFs
-
-    
 def convertLAFs_to_A23format(LAFs):
     sh = LAFs.shape
     if (len(sh) == 3) and (sh[1]  == 2) and (sh[2] == 3): # n x 2 x 3 classical [A, (x;y)] matrix
@@ -228,3 +129,117 @@ def visualize_LAFs(img, LAFs):
         plt.plot( ell[:,0], ell[:,1], 'r')
     plt.show()
     return 
+
+####pytorch
+def rectifyAffineTransformationUpIsUp(A):
+    det = torch.sqrt(torch.abs(A[:,0,0]*A[:,1,1] - A[:,1,0]*A[:,0,1] + 1e-10))
+    b2a2 = torch.sqrt(A[:,0,1] * A[:,0,1] + A[:,0,0] * A[:,0,0])
+    A1_ell = torch.cat([(b2a2 / det).contiguous().view(-1,1,1), 0 * det.view(-1,1,1)], dim = 2)
+    A2_ell = torch.cat([((A[:,1,1]*A[:,0,1]+A[:,1,0]*A[:,0,0])/(b2a2*det)).contiguous().view(-1,1,1),
+                        (det / b2a2).contiguous().view(-1,1,1)], dim = 2)
+    return torch.cat([A1_ell, A2_ell], dim = 1)
+
+
+
+def abc2A(a,b,c, normalize = False):
+    A1_ell = torch.cat([a.view(-1,1,1), b.view(-1,1,1)], dim = 2)
+    A2_ell = torch.cat([b.view(-1,1,1), c.view(-1,1,1)], dim = 2)
+    return torch.cat([A1_ell, A2_ell], dim = 1)
+
+
+
+def angles2A(angles):
+    cos_a = torch.cos(angles).view(-1, 1, 1)
+    sin_a = torch.sin(angles).view(-1, 1, 1)
+    A1_ang = torch.cat([cos_a, sin_a], dim = 2)
+    A2_ang = torch.cat([-sin_a, cos_a], dim = 2)
+    return  torch.cat([A1_ang, A2_ang], dim = 1)
+
+def generate_patch_grid_from_normalized_LAFs(LAFs, w, h, PS):
+    num_lafs = LAFs.size(0)
+    min_size = min(h,w)
+    coef = torch.ones(1,2,3) * 0.5  * min_size
+    coef[0,0,2] = w
+    coef[0,1,2] = h
+    if LAFs.is_cuda:
+        coef = coef.cuda()
+    coef = Variable(coef.expand(num_lafs,2,3))
+    grid = torch.nn.functional.affine_grid(LAFs * coef, torch.Size((num_lafs,1,PS,PS)))
+    grid[:,:,:,0] = 2.0 * grid[:,:,:,0] / float(w)  - 1.0
+    grid[:,:,:,1] = 2.0 * grid[:,:,:,1] / float(h)  - 1.0     
+    return grid
+    
+def extract_patches(img, LAFs, PS = 32):
+    w = img.size(3)
+    h = img.size(2)
+    ch = img.size(1)
+    grid = generate_patch_grid_from_normalized_LAFs(LAFs, float(w),float(h), PS)
+    return torch.nn.functional.grid_sample(img.expand(grid.size(0), ch, h, w),  grid)  
+
+def extract_patches_from_pyramid_with_inv_index(scale_pyramid, pyr_inv_idxs, LAFs, PS = 19):
+    patches = torch.zeros(LAFs.size(0),scale_pyramid[0][0].size(1), PS, PS)
+    if LAFs.is_cuda:
+        patches = patches.cuda()
+    patches = Variable(patches)
+    if pyr_inv_idxs is not None:
+        for i in range(len(scale_pyramid)):
+            for j in range(len(scale_pyramid[i])):
+                cur_lvl_idxs = pyr_inv_idxs[i][j]
+                if cur_lvl_idxs is None:
+                    continue
+                cur_lvl_idxs = cur_lvl_idxs.view(-1)
+                patches[cur_lvl_idxs,:,:,:] = extract_patches(scale_pyramid[i][j],LAFs[cur_lvl_idxs, :,:], PS )
+    return patches
+
+def get_inverted_pyr_index(scale_pyr, pyr_idxs, level_idxs):
+    pyr_inv_idxs = []
+    ### Precompute octave inverted indexes
+    for i in range(len(scale_pyr)):
+        pyr_inv_idxs.append([])
+        cur_idxs = pyr_idxs == i #torch.nonzero((pyr_idxs == i).data)
+        for j in range(0, len(level_idxs)):
+            cur_lvl_idxs = torch.nonzero(((level_idxs == j) * cur_idxs).data)
+            if len(cur_lvl_idxs.size()) == 0:
+                pyr_inv_idxs[-1].append(None)
+            else:
+                pyr_inv_idxs[-1].append(cur_lvl_idxs.squeeze(1))
+    return pyr_inv_idxs
+
+
+def denormalizeLAFs(LAFs, w, h):
+    w = float(w)
+    h = float(h)
+    num_lafs = LAFs.size(0)
+    min_size = min(h,w)
+    coef = torch.ones(1,2,3)  * min_size
+    coef[0,0,2] = w
+    coef[0,1,2] = h
+    if LAFs.is_cuda:
+        coef = coef.cuda()
+    coef = Variable(coef.expand(num_lafs,2,3))
+    return coef * LAFs
+
+def normalizeLAFs(LAFs, w, h):
+    w = float(w)
+    h = float(h)
+    num_lafs = LAFs.size(0)
+    min_size = min(h,w)
+    coef = torch.ones(1,2,3).float()  / min_size
+    coef[0,0,2] = 1.0 / w
+    coef[0,1,2] = 1.0 / h
+    if LAFs.is_cuda:
+        coef = coef.cuda()
+    coef = Variable(coef.expand(num_lafs,2,3))
+    return coef * LAFs
+
+def sc_y_x2LAFs(sc_y_x):
+    base_LAF = torch.eye(2).float().unsqueeze(0).expand(sc_y_x.size(0),2,2)
+    if sc_y_x.is_cuda:
+        base_LAF = base_LAF.cuda()
+    base_A = Variable(base_LAF, requires_grad=False)
+    A = sc_y_x[:,:1].unsqueeze(1).expand_as(base_A) * base_A
+    LAFs  = torch.cat([A,
+                       torch.cat([sc_y_x[:,2:].unsqueeze(-1),
+                                    sc_y_x[:,1:2].unsqueeze(-1)], dim=1)], dim = 2)
+        
+    return LAFs

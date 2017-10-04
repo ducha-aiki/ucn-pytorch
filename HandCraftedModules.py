@@ -8,7 +8,7 @@ from Utils import CircularGaussKernel, GaussianBlur
 from LAF import abc2A,rectifyAffineTransformationUpIsUp
 
 class ScalePyramid(nn.Module):
-    def __init__(self, nLevels = 3, init_sigma = 1.6, border = 5, use_cuda = False):
+    def __init__(self, nLevels = 3, init_sigma = 1.6, border = 5):
         super(ScalePyramid,self).__init__()
         self.nLevels = nLevels;
         self.init_sigma = init_sigma
@@ -16,7 +16,6 @@ class ScalePyramid(nn.Module):
         #print 'step',self.sigmaStep
         self.b = border
         self.minSize = 2 * self.b + 2 + 1;
-        self.use_cuda = use_cuda;
         return
     def forward(self,x):
         pixelDistance = 1.0;
@@ -24,7 +23,7 @@ class ScalePyramid(nn.Module):
         if self.init_sigma > curSigma:
             sigma = np.sqrt(self.init_sigma**2 - curSigma**2)
             curSigma = self.init_sigma
-            curr = GaussianBlur(sigma = sigma, use_cuda = self.use_cuda)(x)
+            curr = GaussianBlur(sigma = sigma)(x)
         else:
             curr = x
         sigmas = [[curSigma]]
@@ -35,7 +34,7 @@ class ScalePyramid(nn.Module):
             for i in range(1, self.nLevels + 2):
                 sigma = curSigma * np.sqrt(self.sigmaStep*self.sigmaStep - 1.0 )
                 #print 'blur sigma', sigma
-                curr = GaussianBlur(sigma = sigma, use_cuda = self.use_cuda)(curr)
+                curr = GaussianBlur(sigma = sigma)(curr)
                 curSigma *= self.sigmaStep
                 pyr[-1].append(curr)
                 sigmas[-1].append(curSigma)
@@ -75,11 +74,9 @@ class HessianResp(nn.Module):
 
 
 class AffineShapeEstimator(nn.Module):
-    def __init__(self, use_cuda = False, 
-                 threshold = 0.001, patch_size = 19):
+    def __init__(self, threshold = 0.001, patch_size = 19):
         super(AffineShapeEstimator, self).__init__()
         self.threshold = threshold;
-        self.use_cuda = use_cuda;
         self.PS = patch_size
         self.gx =  nn.Conv2d(1, 1, kernel_size=(1,3), bias = False)
         self.gx.weight.data = torch.from_numpy(np.array([[[[-1, 0, 1]]]], dtype=np.float32))
@@ -89,8 +86,6 @@ class AffineShapeEstimator(nn.Module):
         
         self.gk = torch.from_numpy(CircularGaussKernel(kernlen=patch_size, circ_zeros = False).astype(np.float32))
         self.gk = Variable(self.gk, requires_grad=False)
-        if use_cuda:
-            self.gk = self.gk.cuda()
         return
     def invSqrt(self,a,b,c):
         eps = 1e-12
@@ -120,6 +115,8 @@ class AffineShapeEstimator(nn.Module):
 
         return l1,l2, new_a, new_b, new_c
     def forward(self,x):
+        if x.is_cuda:
+            self.gk = self.gk.cuda()
         gx = self.gx(F.pad(x, (1,1,0, 0), 'replicate'))
         gy = self.gy(F.pad(x, (0,0, 1,1), 'replicate'))
         a1 = (gx*gx * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
@@ -137,7 +134,7 @@ class AffineShapeEstimator(nn.Module):
         
 
 class OrientationDetector(nn.Module):
-    def __init__(self, use_cuda = False,
+    def __init__(self,
                 mrSize = 3.0, patch_size = None):
         super(OrientationDetector, self).__init__()
         if patch_size is None:
@@ -157,8 +154,6 @@ class OrientationDetector(nn.Module):
         
         self.gk = torch.from_numpy(CircularGaussKernel(kernlen=self.PS).astype(np.float32))
         self.gk = Variable(self.gk, requires_grad=False)
-        if use_cuda:
-            self.gk = self.gk.cuda()
         return
     def get_bin_weight_kernel_size_and_stride(self, patch_size, num_spatial_bins):
         bin_weight_stride = int(round(2.0 * np.floor(patch_size / 2) / float(num_spatial_bins + 1)))
@@ -169,6 +164,8 @@ class OrientationDetector(nn.Module):
         gx = self.gx(F.pad(x, (1,1,0, 0), 'replicate'))
         gy = self.gy(F.pad(x, (0,0, 1,1), 'replicate'))
         mag = torch.sqrt(gx * gx + gy * gy + 1e-10)
+        if x.is_cuda:
+            self.gk = self.gk.cuda()
         mag = mag * self.gk.unsqueeze(0).unsqueeze(0).expand_as(mag)
         ori = torch.atan2(gy,gx)
         o_big = float(self.num_ang_bins) *(ori + 1.0 * math.pi )/ (2.0 * math.pi)
