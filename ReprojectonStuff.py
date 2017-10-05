@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+from LAF import rectifyAffineTransformationUpIsUp
 
 def distance_matrix_vector(anchor, positive):
     """Given batch of anchor descriptors and positive descriptors calculate distance matrix"""
@@ -38,7 +39,7 @@ def inverseLHFs(LHFs):
         LHF1_inv[i,:,:] = LHFs[i,:,:].inverse()
     return LHF1_inv
 
-def reproject_to_canonical_Frob_batched(LHF1_inv, LHF2, batch_size = 2):
+def reproject_to_canonical_Frob_batched(LHF1_inv, LHF2, batch_size = 2, skip_center = False):
     out = torch.zeros((LHF1_inv.size(0), LHF2.size(0)))
     eye1 = torch.eye(3)
     if LHF1_inv.is_cuda:
@@ -58,7 +59,10 @@ def reproject_to_canonical_Frob_batched(LHF1_inv, LHF2, batch_size = 2):
             break
         should_be_eyes = torch.bmm(LHF1_inv[start:fin, :, :].unsqueeze(0).expand(len2,current_bs, 3, 3).contiguous().view(-1,3,3),
                                    LHF2.unsqueeze(1).expand(len2,current_bs, 3,3).contiguous().view(-1,3,3))
-        out[start:fin, :] = torch.sum((should_be_eyes - eye1.unsqueeze(0).expand_as(should_be_eyes))**2, dim=1).sum(dim = 1).view(current_bs, len2)
+        if skip_center:
+            out[start:fin, :] = torch.sum(((should_be_eyes - eye1.unsqueeze(0).expand_as(should_be_eyes))**2)[:,:2,:2] , dim=1).sum(dim = 1).view(current_bs, len2)
+        else:
+            out[start:fin, :] = torch.sum((should_be_eyes - eye1.unsqueeze(0).expand_as(should_be_eyes))**2 , dim=1).sum(dim = 1).view(current_bs, len2)
     return out
 
 def get_GT_correspondence_indexes(LAFs1, LAFs2, H1to2, dist_threshold = 4):    
@@ -74,10 +78,11 @@ def get_GT_correspondence_indexes(LAFs1, LAFs2, H1to2, dist_threshold = 4):
     mask =  min_dist <= dist_threshold
     return min_dist[mask], plain_indxs_in1[mask], idxs_in_2[mask]
 
-def get_GT_correspondence_indexes_Fro(LAFs1,LAFs2, H1to2, dist_threshold = 4):
+def get_GT_correspondence_indexes_Fro(LAFs1,LAFs2, H1to2, dist_threshold = 4,
+                                      skip_center_in_Fro = False):
     LHF2_reprojected_to_1 = reprojectLAFs(LAFs2, torch.inverse(H1to2), True)
     LHF1_inv = inverseLHFs(LAFs_to_H_frames(LAFs1))
-    frob_norm_dist = reproject_to_canonical_Frob_batched(LHF1_inv, LHF2_reprojected_to_1, batch_size = 2)
+    frob_norm_dist = reproject_to_canonical_Frob_batched(LHF1_inv, LHF2_reprojected_to_1, batch_size = 2, skip_center = skip_center_in_Fro)
     min_dist, idxs_in_2 = torch.min(frob_norm_dist,1)
     plain_indxs_in1 = torch.autograd.Variable(torch.arange(0, idxs_in_2.size(0)), requires_grad = False)
     if LAFs1.is_cuda:
@@ -86,16 +91,20 @@ def get_GT_correspondence_indexes_Fro(LAFs1,LAFs2, H1to2, dist_threshold = 4):
     mask =  min_dist <= dist_threshold
     return min_dist[mask], plain_indxs_in1[mask], idxs_in_2[mask]
 
-def get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2, dist_threshold = 4, center_dist_th = 2.0):
+def get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2, dist_threshold = 4, center_dist_th = 2.0,
+                                                 skip_center_in_Fro = False, do_up_is_up = False):
     LHF2_reprojected_to_1 = reprojectLAFs(LAFs2, torch.inverse(H1to2), True)
+    if do_up_is_up:
+        sc = torch.sqrt(LHF2_reprojected_to_1[:,0,0] * LHF2_reprojected_to_1[:,1,1] - LHF2_reprojected_to_1[:,1,0] * LHF2_reprojected_to_1[:,0,1]).unsqueeze(-1).unsqueeze(-1).expand(LHF2_reprojected_to_1.size(0), 2,2)
+        LHF2_reprojected_to_1[:, :2,:2] = rectifyAffineTransformationUpIsUp(LHF2_reprojected_to_1[:, :2,:2]/sc) * sc
     LHF1_inv = inverseLHFs(LAFs_to_H_frames(LAFs1))
-    frob_norm_dist = reproject_to_canonical_Frob_batched(LHF1_inv, LHF2_reprojected_to_1, batch_size = 2)
+    frob_norm_dist = reproject_to_canonical_Frob_batched(LHF1_inv, LHF2_reprojected_to_1, batch_size = 2, skip_center = skip_center_in_Fro)
     #### Center replated
     just_centers1 = LAFs1[:,:,2];
     just_centers2_repr_to_1 = LHF2_reprojected_to_1[:,0:2,2];
     center_dist_mask  = distance_matrix_vector(just_centers2_repr_to_1, just_centers1) >= center_dist_th
     
-    frob_norm_dist_masked = center_dist_mask * 1000. + frob_norm_dist;
+    frob_norm_dist_masked = center_dist_mask.float() * 1000. + frob_norm_dist;
     
     min_dist, idxs_in_2 = torch.min(frob_norm_dist_masked,1)
     plain_indxs_in1 = torch.arange(0, idxs_in_2.size(0))
