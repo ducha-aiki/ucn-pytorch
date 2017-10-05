@@ -112,7 +112,8 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
             if i != self.num_Baum_iters - 1:
                 patches_small =  extract_patches_from_pyramid_with_inv_index(scale_pyr, pyr_inv_idxs, new_LAFs, PS = self.AffNet.PS)
         l1,l2 = batch_eig2x2(base_A)
-        ratio = torch.abs(l1 / (l2 + 1e-8))
+        #ratio = torch.abs(l1 / (l2 + 1e-8))
+        ratio = 1.0 + 0 * torch.abs(l1 / (l2 + 1e-8)) #CHANGE after training
         idxs_mask = (ratio < 6.0) * (ratio > (1./6.)) * (is_good > 0.5)
         num_survived = idxs_mask.sum()
         

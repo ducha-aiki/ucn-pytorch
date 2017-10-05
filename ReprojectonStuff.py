@@ -93,7 +93,7 @@ def get_GT_correspondence_indexes_Fro(LAFs1,LAFs2, H1to2, dist_threshold = 4,
     return min_dist[mask], plain_indxs_in1[mask], idxs_in_2[mask]
 
 def get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2, dist_threshold = 4, center_dist_th = 2.0,
-                                                 skip_center_in_Fro = False, do_up_is_up = False):
+                                                 skip_center_in_Fro = False, do_up_is_up = False, return_LAF2_in_1 = False):
     LHF2_in_1_pre = reprojectLAFs(LAFs2, torch.inverse(H1to2), True)
     if do_up_is_up:
         sc = torch.sqrt(LHF2_in_1_pre[:,0,0] * LHF2_in_1_pre[:,1,1] - LHF2_in_1_pre[:,1,0] * LHF2_in_1_pre[:,0,1]).unsqueeze(-1).unsqueeze(-1).expand(LHF2_in_1_pre.size(0), 2,2)
@@ -123,7 +123,10 @@ def get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2, dist_thresh
     #print min_dist.min(), min_dist.max(), min_dist.mean()
     mask =  (min_dist <= dist_threshold )
     
-    return min_dist[mask], plain_indxs_in1[mask], idxs_in_2[mask]
+    if return_LAF2_in_1:
+        return min_dist[mask], plain_indxs_in1[mask], idxs_in_2[mask], LHF2_in_1[:,0:2,:]
+    else:
+        return min_dist[mask], plain_indxs_in1[mask], idxs_in_2[mask]
 
 
 
