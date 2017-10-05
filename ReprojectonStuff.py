@@ -86,6 +86,27 @@ def get_GT_correspondence_indexes_Fro(LAFs1,LAFs2, H1to2, dist_threshold = 4):
     mask =  min_dist <= dist_threshold
     return min_dist[mask], plain_indxs_in1[mask], idxs_in_2[mask]
 
+def get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2, dist_threshold = 4, center_dist_th = 2.0):
+    LHF2_reprojected_to_1 = reprojectLAFs(LAFs2, torch.inverse(H1to2), True)
+    LHF1_inv = inverseLHFs(LAFs_to_H_frames(LAFs1))
+    frob_norm_dist = reproject_to_canonical_Frob_batched(LHF1_inv, LHF2_reprojected_to_1, batch_size = 2)
+    #### Center replated
+    just_centers1 = LAFs1[:,:,2];
+    just_centers2_repr_to_1 = LHF2_reprojected_to_1[:,0:2,2];
+    center_dist_mask  = distance_matrix_vector(just_centers2_repr_to_1, just_centers1) >= center_dist_th
+    
+    frob_norm_dist_masked = center_dist_mask * 1000. + frob_norm_dist;
+    
+    min_dist, idxs_in_2 = torch.min(frob_norm_dist_masked,1)
+    plain_indxs_in1 = torch.arange(0, idxs_in_2.size(0))
+    if LAFs1.is_cuda:
+        plain_indxs_in1 = plain_indxs_in1.cuda()
+    plain_indxs_in1 = torch.autograd.Variable(plain_indxs_in1, requires_grad = False)
+    #min_dist, idxs_in_2 = torch.min(dist,1)
+    #print min_dist.min(), min_dist.max(), min_dist.mean()
+    mask =  (min_dist <= dist_threshold )
+    
+    return min_dist[mask], plain_indxs_in1[mask], idxs_in_2[mask]
 
 
 
