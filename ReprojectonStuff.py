@@ -1,7 +1,8 @@
 import torch
+from torch.autograd import Variable
 import numpy as np
 from LAF import rectifyAffineTransformationUpIsUp
-
+from Utils import zeros_like
 def distance_matrix_vector(anchor, positive):
     """Given batch of anchor descriptors and positive descriptors calculate distance matrix"""
 
@@ -66,9 +67,9 @@ def reproject_to_canonical_Frob_batched(LHF1_inv, LHF2, batch_size = 2, skip_cen
     return out
 
 def get_GT_correspondence_indexes(LAFs1, LAFs2, H1to2, dist_threshold = 4):    
-    LHF2_reprojected_to_1 = reprojectLAFs(LAFs2, torch.inverse(H1to2), True)
+    LHF2_in_1_pre = reprojectLAFs(LAFs2, torch.inverse(H1to2), True)
     just_centers1 = LAFs1[:,:,2];
-    just_centers2_repr_to_1 = LHF2_reprojected_to_1[:,0:2,2];
+    just_centers2_repr_to_1 = LHF2_in_1_pre[:,0:2,2];
     
     dist  = distance_matrix_vector(just_centers2_repr_to_1, just_centers1)
     min_dist, idxs_in_2 = torch.min(dist,1)
@@ -80,9 +81,9 @@ def get_GT_correspondence_indexes(LAFs1, LAFs2, H1to2, dist_threshold = 4):
 
 def get_GT_correspondence_indexes_Fro(LAFs1,LAFs2, H1to2, dist_threshold = 4,
                                       skip_center_in_Fro = False):
-    LHF2_reprojected_to_1 = reprojectLAFs(LAFs2, torch.inverse(H1to2), True)
+    LHF2_in_1_pre = reprojectLAFs(LAFs2, torch.inverse(H1to2), True)
     LHF1_inv = inverseLHFs(LAFs_to_H_frames(LAFs1))
-    frob_norm_dist = reproject_to_canonical_Frob_batched(LHF1_inv, LHF2_reprojected_to_1, batch_size = 2, skip_center = skip_center_in_Fro)
+    frob_norm_dist = reproject_to_canonical_Frob_batched(LHF1_inv, LHF2_in_1_pre, batch_size = 2, skip_center = skip_center_in_Fro)
     min_dist, idxs_in_2 = torch.min(frob_norm_dist,1)
     plain_indxs_in1 = torch.autograd.Variable(torch.arange(0, idxs_in_2.size(0)), requires_grad = False)
     if LAFs1.is_cuda:
@@ -93,15 +94,22 @@ def get_GT_correspondence_indexes_Fro(LAFs1,LAFs2, H1to2, dist_threshold = 4,
 
 def get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2, dist_threshold = 4, center_dist_th = 2.0,
                                                  skip_center_in_Fro = False, do_up_is_up = False):
-    LHF2_reprojected_to_1 = reprojectLAFs(LAFs2, torch.inverse(H1to2), True)
+    LHF2_in_1_pre = reprojectLAFs(LAFs2, torch.inverse(H1to2), True)
     if do_up_is_up:
-        sc = torch.sqrt(LHF2_reprojected_to_1[:,0,0] * LHF2_reprojected_to_1[:,1,1] - LHF2_reprojected_to_1[:,1,0] * LHF2_reprojected_to_1[:,0,1]).unsqueeze(-1).unsqueeze(-1).expand(LHF2_reprojected_to_1.size(0), 2,2)
-        LHF2_reprojected_to_1[:, :2,:2] = rectifyAffineTransformationUpIsUp(LHF2_reprojected_to_1[:, :2,:2]/sc) * sc
+        sc = torch.sqrt(LHF2_in_1_pre[:,0,0] * LHF2_in_1_pre[:,1,1] - LHF2_in_1_pre[:,1,0] * LHF2_in_1_pre[:,0,1]).unsqueeze(-1).unsqueeze(-1).expand(LHF2_in_1_pre.size(0), 2,2)
+        LHF2_in_1 = torch.zeros(LHF2_in_1_pre.size())
+        if LHF2_in_1_pre.is_cuda:
+            LHF2_in_1 = LHF2_in_1.cuda()
+        LHF2_in_1 = Variable(LHF2_in_1)
+        LHF2_in_1[:, :2,:2] = rectifyAffineTransformationUpIsUp(LHF2_in_1_pre[:, :2,:2]/sc) * sc
+        LHF2_in_1[:,:, 2] = LHF2_in_1_pre[:,:,2]
+    else:
+        LHF2_in_1 = LHF2_in_1_pre
     LHF1_inv = inverseLHFs(LAFs_to_H_frames(LAFs1))
-    frob_norm_dist = reproject_to_canonical_Frob_batched(LHF1_inv, LHF2_reprojected_to_1, batch_size = 2, skip_center = skip_center_in_Fro)
+    frob_norm_dist = reproject_to_canonical_Frob_batched(LHF1_inv, LHF2_in_1, batch_size = 2, skip_center = skip_center_in_Fro)
     #### Center replated
     just_centers1 = LAFs1[:,:,2];
-    just_centers2_repr_to_1 = LHF2_reprojected_to_1[:,0:2,2];
+    just_centers2_repr_to_1 = LHF2_in_1[:,0:2,2];
     center_dist_mask  = distance_matrix_vector(just_centers2_repr_to_1, just_centers1) >= center_dist_th
     
     frob_norm_dist_masked = center_dist_mask.float() * 1000. + frob_norm_dist;
