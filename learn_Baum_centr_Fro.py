@@ -156,7 +156,10 @@ def train(train_loader, model, optimizer, epoch, cuda = True):
         if (len(LAFs1) == 0) or (len(LAFs2) == 0):
             optimizer.zero_grad()
             continue
-        fro_dists, idxs_in1, idxs_in2 = get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2, dist_threshold = 10., center_dist_th = 4.0);
+        fro_dists, idxs_in1, idxs_in2 = get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2,  dist_threshold = 2., 
+                                                                             center_dist_th = 5.0,
+                                                                            skip_center_in_Fro = True,
+                                                                            do_up_is_up = True);
         if  len(fro_dists.size()) == 0:
             optimizer.zero_grad()
             print 'skip'
@@ -198,7 +201,11 @@ def test(test_loader, model, cuda = True):
         LAFs2, aff_norm_patches2, resp2, pyr2 = HA(img2)
         if (len(LAFs1) == 0) or (len(LAFs2) == 0):
             continue
-        fro_dists, idxs_in1, idxs_in2 = get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2, dist_threshold = 20., center_dist_th = 10.0);
+        fro_dists, idxs_in1, idxs_in2 = get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2, 
+                                                                                     dist_threshold = 2., 
+                                                                             center_dist_th = 5.0,
+                                                                            skip_center_in_Fro = True,
+                                                                            do_up_is_up = True);
         if  len(fro_dists.size()) == 0:
             print 'skip'
             continue
