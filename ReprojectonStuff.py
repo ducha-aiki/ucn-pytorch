@@ -95,7 +95,7 @@ def get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2, dist_thresh
     just_centers2_repr_to_1 = LHF2_reprojected_to_1[:,0:2,2];
     center_dist_mask  = distance_matrix_vector(just_centers2_repr_to_1, just_centers1) >= center_dist_th
     
-    frob_norm_dist_masked = center_dist_mask * 1000. + frob_norm_dist;
+    frob_norm_dist_masked = center_dist_mask.float() * 1000. + frob_norm_dist;
     
     min_dist, idxs_in_2 = torch.min(frob_norm_dist_masked,1)
     plain_indxs_in1 = torch.arange(0, idxs_in_2.size(0))
