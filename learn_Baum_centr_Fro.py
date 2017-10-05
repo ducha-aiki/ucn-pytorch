@@ -20,7 +20,10 @@ from tqdm import tqdm
 USE_CUDA = True
 
 LOG_DIR = 'log_snaps'
-BASE_LR = 0.01
+BASE_LR = 0.1
+start = 0
+end = 100
+n_epochs = end - start
 from SpatialTransformer2D import SpatialTransformer2d
 from HardNet import HardNet
 #hardnet = HardNet()
@@ -42,6 +45,9 @@ class BaumNet(nn.Module):
             nn.BatchNorm2d(16, affine=True),
             nn.ReLU(),
             nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1, bias = False),
+            nn.BatchNorm2d(32, affine=True),
+            nn.ReLU(),
+            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1, bias = False),
             nn.BatchNorm2d(32, affine=True),
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=3, stride=2,padding=1, bias = False),
@@ -87,7 +93,7 @@ def adjust_learning_rate(optimizer):
             group['step'] = 0.
         else:
             group['step'] += 1.
-        group['lr'] =  BASE_LR #*  .0 - float(group['step']) * float(1.0) / (n_triplets * float(n_epochs)))
+        group['lr'] =  BASE_LR *  (1.0 - float(group['step']) * float(1.0) / (n_triplets * float(n_epochs)))
     return
 
 def create_optimizer(model, new_lr, wd):
@@ -123,6 +129,7 @@ def train(train_loader, model, optimizer, epoch, cuda = True):
     # switch to train mode
     model.train()
     log_interval = 1
+    total_loss = 0
     spatial_only = True
     pbar = enumerate(train_loader)
     for batch_idx, data in pbar:
@@ -155,15 +162,17 @@ def train(train_loader, model, optimizer, epoch, cuda = True):
             print 'skip'
             continue
         loss = fro_dists.mean()
-        patch_dist = torch.mean((aff_norm_patches1[idxs_in1.data.long(),:,:,:] - aff_norm_patches2[idxs_in2.data.long(), :,:,:]) **2)
-        print loss.data.cpu().numpy()[0], patch_dist.data.cpu().numpy()[0]
-        loss += patch_dist
+        total_loss += loss.data.cpu().numpy()[0]
+        #patch_dist = torch.mean((aff_norm_patches1[idxs_in1.data.long(),:,:,:] - aff_norm_patches2[idxs_in2.data.long(), :,:,:]) **2)
+        print loss.data.cpu().numpy()[0]#, patch_dist.data.cpu().numpy()[0]
+        #loss += patch_dist
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         #adjust_learning_rate(optimizer)
         print epoch,batch_idx, loss.data.cpu().numpy()[0], idxs_in1.shape
 
+    print 'Train total loss:', total_loss / float(batch_idx+1)
     torch.save({'epoch': epoch + 1, 'state_dict': model.state_dict()},
                '{}/checkpoint_{}.pth'.format(LOG_DIR, epoch))
 
@@ -189,7 +198,7 @@ def test(test_loader, model, cuda = True):
         LAFs2, aff_norm_patches2, resp2, pyr2 = HA(img2)
         if (len(LAFs1) == 0) or (len(LAFs2) == 0):
             continue
-        fro_dists, idxs_in1, idxs_in2 = get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2, dist_threshold = 10., center_dist_th = 4.0);
+        fro_dists, idxs_in1, idxs_in2 = get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2, dist_threshold = 20., center_dist_th = 10.0);
         if  len(fro_dists.size()) == 0:
             print 'skip'
             continue
@@ -200,7 +209,7 @@ def test(test_loader, model, cuda = True):
 
 train_loader, test_loader = create_loaders()
 
-HA = ScaleSpaceAffinePatchExtractor( mrSize = 3.0, num_features = 500, border = 5, num_Baum_iters = 1, AffNet = BaumNet())
+HA = ScaleSpaceAffinePatchExtractor( mrSize = 3.0, num_features = 350, border = 5, num_Baum_iters = 1, AffNet = BaumNet())
 
 
 model = HA
@@ -210,9 +219,7 @@ if USE_CUDA:
 optimizer1 = create_optimizer(model.AffNet, BASE_LR, 5e-5)
 
 
-start = 0
-end = 100
-for epoch in range(start, end):
+for epoch in range(n_epochs):
     print 'epoch', epoch
     if USE_CUDA:
         model = model.cuda()
