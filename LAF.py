@@ -188,7 +188,7 @@ def extract_patches_from_pyramid_with_inv_index(scale_pyramid, pyr_inv_idxs, LAF
                 if cur_lvl_idxs is None:
                     continue
                 cur_lvl_idxs = cur_lvl_idxs.view(-1)
-                patches[cur_lvl_idxs,:,:,:] = extract_patches(scale_pyramid[i][j],LAFs[cur_lvl_idxs, :,:], PS )
+                patches[cur_lvl_idxs,:,:,:] = extract_patches(scale_pyramid[max(i-2, 0)][0],LAFs[cur_lvl_idxs, :,:], PS )
     return patches
 
 def get_inverted_pyr_index(scale_pyr, pyr_idxs, level_idxs):
@@ -197,12 +197,12 @@ def get_inverted_pyr_index(scale_pyr, pyr_idxs, level_idxs):
     for i in range(len(scale_pyr)):
         pyr_inv_idxs.append([])
         cur_idxs = pyr_idxs == i #torch.nonzero((pyr_idxs == i).data)
-        for j in range(0, len(level_idxs)):
+        for j in range(0, len(scale_pyr[i])):
             cur_lvl_idxs = torch.nonzero(((level_idxs == j) * cur_idxs).data)
             if len(cur_lvl_idxs.size()) == 0:
                 pyr_inv_idxs[-1].append(None)
             else:
-                pyr_inv_idxs[-1].append(cur_lvl_idxs.squeeze(1))
+                pyr_inv_idxs[-1].append(cur_lvl_idxs.squeeze())
     return pyr_inv_idxs
 
 

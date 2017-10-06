@@ -90,7 +90,7 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
             final_level_idxs = level_idxs_scale[idxs]
         else:
             return all_responses, aff_m_scales, pyr_idxs_scales , level_idxs_scale, scale_pyr
-        return all_responses, LAFs, final_pyr_idxs, final_level_idxs,scale_pyr
+        return all_responses, LAFs, final_pyr_idxs, final_level_idxs, scale_pyr
     
     def getAffineShape(self,scale_pyr, final_resp, LAFs, final_pyr_idxs, final_level_idxs, num_features = 0 ):
         pyr_inv_idxs = get_inverted_pyr_index(scale_pyr, final_pyr_idxs, final_level_idxs)
