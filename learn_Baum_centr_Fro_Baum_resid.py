@@ -20,7 +20,7 @@ from tqdm import tqdm
 USE_CUDA = True
 
 LOG_DIR = 'log_snaps'
-BASE_LR = 0.1
+BASE_LR = 0.01
 start = 0
 end = 20
 n_epochs = end - start
@@ -162,6 +162,7 @@ def train(train_loader, model, optimizer, epoch, cuda = True):
                                                                              center_dist_th = 7.0,
                                                                             skip_center_in_Fro = True,
                                                                             do_up_is_up = True);
+        print LAFs1[0,:,:] 
         if  len(fro_dists.size()) == 0:
             optimizer.zero_grad()
             print 'skip'
@@ -179,7 +180,7 @@ def train(train_loader, model, optimizer, epoch, cuda = True):
 
     print 'Train total loss:', total_loss / float(batch_idx+1)
     torch.save({'epoch': epoch + 1, 'state_dict': model.state_dict()},
-               '{}/checkpoint_{}.pth'.format(LOG_DIR, epoch))
+               '{}/new_checkpoint_{}.pth'.format(LOG_DIR, epoch))
 
 def test(test_loader, model, cuda = True):
     # switch to train mode
@@ -209,6 +210,7 @@ def test(test_loader, model, cuda = True):
                                                                              center_dist_th = 7.0,
                                                                             skip_center_in_Fro = True,
                                                                             do_up_is_up = True);
+        print LAFs1[0,:,:] 
         if  len(fro_dists.size()) == 0:
             print 'skip'
             continue
