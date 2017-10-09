@@ -41,18 +41,16 @@ class BaumResNet(nn.Module):
         super(BaumResNet, self).__init__()
 
         self.features = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, padding=1, bias = False),
-            nn.BatchNorm2d(16, affine=False),
-            nn.ReLU(),
-            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1, bias = False),
-            nn.BatchNorm2d(32, affine=False),
-            nn.ReLU(),
-            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1, bias = False),
-            nn.BatchNorm2d(32, affine=False),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, stride=2,padding=1, bias = False),
-            nn.BatchNorm2d(64, affine=False),
-            nn.ReLU(),
+            nn.Conv2d(1, 16, kernel_size=3, padding=1, bias = True),
+            nn.ELU(),
+            nn.Conv2d(16, 16, kernel_size=3, stride=1, padding=1, bias = True),
+            nn.ELU(),
+            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1, bias = True),
+            nn.ELU(),
+            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1, bias = True),
+            nn.ELU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2,padding=1, bias = True),
+            nn.ELU(),
             nn.Dropout(0.1),
             nn.Conv2d(64, 3, kernel_size=4, bias = True),
             nn.Tanh()

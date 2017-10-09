@@ -22,7 +22,7 @@ from Utils import line_prepender
 
 
 
-USE_CUDA = True
+USE_CUDA = False
 
 
 try:
@@ -51,5 +51,5 @@ LAFs, patches, resp, pyr = HA(var_image_reshape)
 ells = LAFs2ell(LAFs.data.cpu().numpy())
 
 np.savetxt(output_fname, ells, delimiter=' ', fmt='%10.10f')
-#line_prepender(output_fname, str(len(ells)))
-#line_prepender(output_fname, '1.0')
+line_prepender(output_fname, str(len(ells)))
+line_prepender(output_fname, '1.0')

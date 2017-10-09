@@ -29,6 +29,7 @@ class ScalePyramid(nn.Module):
         sigmas = [[curSigma]]
         pixel_dists = [[1.0]]
         pyr = [[curr]]
+        j = 0
         while True:
             curr = pyr[-1][0]
             for i in range(1, self.nLevels + 2):
@@ -36,9 +37,9 @@ class ScalePyramid(nn.Module):
                 #print 'blur sigma', sigma
                 curr = GaussianBlur(sigma = sigma)(curr)
                 curSigma *= self.sigmaStep
-                pyr[-1].append(curr)
-                sigmas[-1].append(curSigma)
-                pixel_dists[-1].append(pixelDistance)
+                pyr[j].append(curr)
+                sigmas[j].append(curSigma)
+                pixel_dists[j].append(pixelDistance)
                 if i == self.nLevels:
                     nextOctaveFirstLevel = F.avg_pool2d(curr, kernel_size = 1, stride = 2, padding = 0) 
             pixelDistance = pixelDistance * 2.0
@@ -48,6 +49,7 @@ class ScalePyramid(nn.Module):
             pyr.append([nextOctaveFirstLevel])
             sigmas.append([curSigma])
             pixel_dists.append([pixelDistance])
+            j+=1
         return pyr, sigmas, pixel_dists
 
 class HessianResp(nn.Module):
@@ -84,7 +86,7 @@ class AffineShapeEstimator(nn.Module):
         self.gy =  nn.Conv2d(1, 1, kernel_size=(3,1), bias = False)
         self.gy.weight.data = torch.from_numpy(np.array([[[[-1], [0], [1]]]], dtype=np.float32))
         
-        self.gk = torch.from_numpy(CircularGaussKernel(kernlen=patch_size, circ_zeros = False).astype(np.float32))
+        self.gk = torch.from_numpy(CircularGaussKernel(kernlen = self.PS, sigma = (self.PS / 2) /3.0).astype(np.float32))
         self.gk = Variable(self.gk, requires_grad=False)
         return
     def invSqrt(self,a,b,c):
@@ -94,12 +96,11 @@ class AffineShapeEstimator(nn.Module):
         t1 = torch.sign(r1) / (torch.abs(r1) + torch.sqrt(1. + r1*r1));
         r = 1.0 / torch.sqrt( 1. + t1*t1)
         t = t1*r;
-        
         r = r * mask + 1.0 * (1.0 - mask);
         t = t * mask;
         
-        x = 1. / torch.sqrt( r*r*a - 2*r*t*b + t*t*c)
-        z = 1. / torch.sqrt( t*t*a + 2*r*t*b + r*r*c)
+        x = 1. / torch.sqrt( r*r*a - 2.0*r*t*b + t*t*c)
+        z = 1. / torch.sqrt( t*t*a + 2.0*r*t*b + r*r*c)
         
         d = torch.sqrt( x * z)
         
@@ -113,24 +114,19 @@ class AffineShapeEstimator(nn.Module):
         new_b = -r*t*x + t*r*z
         new_c = t*t*x + r*r *z
 
-        return l1,l2, new_a, new_b, new_c
+        return new_a, new_b, new_c, l1, l2
     def forward(self,x):
         if x.is_cuda:
             self.gk = self.gk.cuda()
-        gx = self.gx(F.pad(x, (1,1,0, 0), 'replicate'))
-        gy = self.gy(F.pad(x, (0,0, 1,1), 'replicate'))
-        a1 = (gx*gx * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
-        b1 = (gx*gy * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
-        c1 = (gy*gy * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
-        l1, l2, a, b, c = self.invSqrt(a1,b1,c1)
+        gx = self.gx(F.pad(x, (1, 1, 0, 0), 'replicate'))
+        gy = self.gy(F.pad(x, (0, 0, 1, 1), 'replicate'))
+        a1 = (gx * gx * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
+        b1 = (gx * gy * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
+        c1 = (gy * gy * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)
+        a, b, c, l1, l2 = self.invSqrt(a1,b1,c1)
         rat1 = l1/l2
         mask = (torch.abs(rat1) <= 6.).float().view(-1);
-        #a = a * mask + 1. * (1.- mask)
-        #b = b * mask + 0. * (1.- mask)
-        #c = c * mask + 1. * (1.- mask)
-        return torch.cat([torch.cat([a.unsqueeze(-1).unsqueeze(-1), b.unsqueeze(-1).unsqueeze(-1)], dim = 2),
-                                        torch.cat([b.unsqueeze(-1).unsqueeze(-1), c.unsqueeze(-1).unsqueeze(-1)], dim = 2)],
-                                        dim = 1), mask
+        return abc2A(a,b,c), mask
         
 
 class OrientationDetector(nn.Module):
@@ -152,7 +148,7 @@ class OrientationDetector(nn.Module):
         self.angular_smooth =  nn.Conv1d(1, 1, kernel_size=3, padding = 1, bias = False)
         self.angular_smooth.weight.data = torch.from_numpy(np.array([[[0.33, 0.34, 0.33]]], dtype=np.float32))
         
-        self.gk = torch.from_numpy(CircularGaussKernel(kernlen=self.PS).astype(np.float32))
+        self.gk = 10. * torch.from_numpy(CircularGaussKernel(kernlen=self.PS).astype(np.float32))
         self.gk = Variable(self.gk, requires_grad=False)
         return
     def get_bin_weight_kernel_size_and_stride(self, patch_size, num_spatial_bins):

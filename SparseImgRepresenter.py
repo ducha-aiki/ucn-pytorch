@@ -66,14 +66,13 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
                 
                 nms_f = NMS3dAndComposeA(scales = sigmas_oct[level_idx - 1:level_idx + 2],
                                         border = self.b, mrSize = self.mrSize)
-                
                 top_resp, aff_matrix, octaveMap_current  = nms_f(low, cur, high, octaveMap, num_features = num_features)
                 if top_resp is None:
                     continue
                 octaveMap = octaveMap_current
                 aff_matrices.append(aff_matrix), top_responces.append(top_resp)
                 pyr_id = Variable(oct_idx * torch.ones(aff_matrix.size(0)))
-                lev_id = Variable(level_idx * torch.ones(aff_matrix.size(0)))
+                lev_id = Variable((level_idx - 1) * torch.ones(aff_matrix.size(0))) #prevBlur
                 if x.is_cuda:
                     pyr_id = pyr_id.cuda()
                     lev_id = lev_id.cuda()
@@ -92,8 +91,9 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
             return all_responses, aff_m_scales, pyr_idxs_scales , level_idxs_scale, scale_pyr
         return all_responses, LAFs, final_pyr_idxs, final_level_idxs, scale_pyr
     
-    def getAffineShape(self,scale_pyr, final_resp, LAFs, final_pyr_idxs, final_level_idxs, num_features = 0 ):
+    def getAffineShape(self,scale_pyr, final_resp, LAFs, final_pyr_idxs, final_level_idxs, num_features = 0):
         pyr_inv_idxs = get_inverted_pyr_index(scale_pyr, final_pyr_idxs, final_level_idxs)
+        #print LAFs[0:2,:,:]
         patches_small = extract_patches_from_pyramid_with_inv_index(scale_pyr, pyr_inv_idxs, LAFs, PS = self.AffNet.PS)
         base_A = torch.eye(2).unsqueeze(0).expand(final_pyr_idxs.size(0),2,2)
         if final_resp.is_cuda:
@@ -102,34 +102,46 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
         is_good = None
         for i in range(self.num_Baum_iters):
             A, is_good_current = self.AffNet(patches_small)
-            l1,l2 = batch_eig2x2(A)      
             if is_good is None:
                 is_good = is_good_current
             else:
                 is_good = is_good * is_good_current
             base_A = torch.bmm(A, base_A); 
             new_LAFs = torch.cat([torch.bmm(base_A,LAFs[:,:,0:2]), LAFs[:,:,2:] ], dim =2)
+            #print torch.sqrt(new_LAFs[0,0,0]*new_LAFs[0,1,1] - new_LAFs[0,1,0] *new_LAFs[0,0,1]) * scale_pyr[0][0].size(2)
             if i != self.num_Baum_iters - 1:
                 patches_small =  extract_patches_from_pyramid_with_inv_index(scale_pyr, pyr_inv_idxs, new_LAFs, PS = self.AffNet.PS)
+                l1,l2 = batch_eig2x2(A)      
+                ratio1 =  torch.abs(l1 / (l2 + 1e-8))
+                converged_mask = (ratio1 <= 1.2) * (ratio1 >= (0.8)) 
         l1,l2 = batch_eig2x2(base_A)
-        #ratio = torch.abs(l1 / (l2 + 1e-8))
-        ratio = 1.0 + 0 * torch.abs(l1 / (l2 + 1e-8)) #CHANGE after training
-        idxs_mask = (ratio < 6.0) * (ratio > (1./6.)) * (is_good > 0.5)
-        num_survived = idxs_mask.sum()
-        
+        #print l1,l2
+        ratio = torch.abs(l1 / (l2 + 1e-8))
+        #print new_LAFs[0:2,:,:]
+        #print '***'
+        #print ((ratio < 6.0) * (ratio > (1./6.))).float().sum()
+        #print converged_mask.float().sum()
+        #print is_good.float().sum()
+
+        #ratio = 1.0 + 0 * torch.abs(l1 / (l2 + 1e-8)) #CHANGE after training
+        idxs_mask = (ratio < 6.0) * (ratio > (1./6.)) * (is_good > 0.5)#  * converged_mask
+        #idxs_mask = ((ratio < 6.0) * (ratio > (1./6.)))# * converged_mask.float()) > 0
+        num_survived = idxs_mask.float().sum()
+        print num_survived
         if (num_features > 0) and (num_survived.data[0] > num_features):
-            final_resp =  final_resp * idxs_mask #zero bad points
+            final_resp =  final_resp * idxs_mask.float() #zero bad points
             final_resp, idxs = torch.topk(final_resp, k = num_features);
         else:
-            idxs = torch.nonzero(idxs_mask.data).view(-1)
+            idxs = torch.nonzero(idxs_mask.data).view(-1).long().data
             final_resp = final_resp[idxs]
-        
         final_pyr_idxs = final_pyr_idxs[idxs]
         final_level_idxs = final_level_idxs[idxs]
-        base_A = base_A[idxs,:,:]
-        LAFs = LAFs[idxs,:,:]
+        base_A = torch.index_select(base_A, 0, idxs)
+        LAFs = torch.index_select(LAFs, 0, idxs)
         new_LAFs = torch.cat([torch.bmm(rectifyAffineTransformationUpIsUp(base_A), LAFs[:,:,0:2]),
                                LAFs[:,:,2:]], dim =2)
+        #new_LAFs = torch.cat([torch.bmm(base_A, LAFs[:,:,0:2]),
+        #                       LAFs[:,:,2:]], dim =2)
         return final_resp, new_LAFs, final_pyr_idxs, final_level_idxs  
     
     def getOrientation(self,scale_pyr, LAFs, final_pyr_idxs, final_level_idxs):
@@ -149,13 +161,14 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
         ### Detection
         num_features_prefilter = self.num
         if self.num_Baum_iters > 0:
-            num_features_prefilter = 2 * self.num;
+            num_features_prefilter = 3 * self.num;
         responses, LAFs, final_pyr_idxs, final_level_idxs,scale_pyr = self.multiScaleDetector(x,num_features_prefilter)
-        LAFs[:,:,0:2] =  LAFs[:,:,0:2] / self.init_sigma
+        LAFs[:,0:2,0:2] =   self.mrSize * LAFs[:,:,0:2]
+        #LAFs[:,:,0:2] =  LAFs[:,:,0:2] / self.init_sigma
         if self.num_Baum_iters > 0:
             responses, LAFs, final_pyr_idxs, final_level_idxs  = self.getAffineShape(scale_pyr, responses, LAFs, final_pyr_idxs, final_level_idxs, self.num)
-        LAFs[:,:,0:2] =  self.init_sigma * self.mrSize * LAFs[:,:,0:2]
         #LAFs = self.getOrientation(scale_pyr, LAFs, final_pyr_idxs, final_level_idxs)
-        pyr_inv_idxs = get_inverted_pyr_index(scale_pyr, final_pyr_idxs, final_level_idxs)
-        patches = extract_patches_from_pyramid_with_inv_index(scale_pyr, pyr_inv_idxs, LAFs, PS = self.PS)
+        #pyr_inv_idxs = get_inverted_pyr_index(scale_pyr, final_pyr_idxs, final_level_idxs)
+        #patches = extract_patches_from_pyramid_with_inv_index(scale_pyr, pyr_inv_idxs, LAFs, PS = self.PS)
+        patches = extract_patches(x, LAFs, PS = self.PS)
         return denormalizeLAFs(LAFs, x.size(3), x.size(2)), patches, responses, scale_pyr
