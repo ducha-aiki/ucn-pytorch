@@ -118,6 +118,8 @@ class AffineShapeEstimator(nn.Module):
     def forward(self,x):
         if x.is_cuda:
             self.gk = self.gk.cuda()
+        else:
+            self.gk = self.gk.cpu()
         gx = self.gx(F.pad(x, (1, 1, 0, 0), 'replicate'))
         gy = self.gy(F.pad(x, (0, 0, 1, 1), 'replicate'))
         a1 = (gx * gx * self.gk.unsqueeze(0).unsqueeze(0).expand_as(gx)).view(x.size(0),-1).mean(dim=1)

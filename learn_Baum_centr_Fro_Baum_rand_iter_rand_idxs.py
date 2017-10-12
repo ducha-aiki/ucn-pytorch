@@ -21,32 +21,34 @@ USE_CUDA = True
 
 LOG_DIR = 'log_snaps'
 BASE_LR = 0.01
+start = 0
+end = 25
+n_epochs = end - start
 from SpatialTransformer2D import SpatialTransformer2d
 from HardNet import HardNet
 #hardnet = HardNet()
 #checkpoint = torch.load('HardNetLib.pth')
 #hardnet.load_state_dict(checkpoint['state_dict'])
-
+from HandCraftedModules import AffineShapeEstimator
 
 from SparseImgRepresenter import ScaleSpaceAffinePatchExtractor
-from LAF import denormalizeLAFs, LAFs2ell, abc2A
+from LAF import denormalizeLAFs, LAFs2ell, abc2A, extract_patches,normalizeLAFs
 from ReprojectonStuff import get_GT_correspondence_indexes_Fro,get_GT_correspondence_indexes,get_GT_correspondence_indexes_Fro_and_center
 class BaumNet(nn.Module):
-    """HardNet model definition
-    """
     def __init__(self, PS = 16):
         super(BaumNet, self).__init__()
 
         self.features = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, padding=1, bias = False),
-            nn.BatchNorm2d(16, affine=True),
-            nn.ReLU(),
-            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1, bias = False),
-            nn.BatchNorm2d(32, affine=True),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, stride=2,padding=1, bias = False),
-            nn.BatchNorm2d(64, affine=True),
-            nn.ReLU(),
+            nn.Conv2d(1, 16, kernel_size=3, padding=1, bias = True),
+            nn.ELU(),
+            nn.Conv2d(16, 16, kernel_size=3, stride=1, padding=1, bias = True),
+            nn.ELU(),
+            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1, bias = True),
+            nn.ELU(),
+            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1, bias = True),
+            nn.ELU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2,padding=1, bias = True),
+            nn.ELU(),
             nn.Dropout(0.1),
             nn.Conv2d(64, 3, kernel_size=4, bias = True),
             nn.Tanh()
@@ -62,16 +64,16 @@ class BaumNet(nn.Module):
 
     def forward(self, input):
         abc = self.features(self.input_norm(input))
-        a = (abc[:,0,:,:].contiguous() + 1.)
-        b = (abc[:,1,:,:].contiguous() + 0.)
-        c = (abc[:,2,:,:].contiguous() + 1.)
-        return abc2A(a,b,c), 1.0
+        a = (abc[:,0,:,:].contiguous()  + 1.0)
+        b = (abc[:,1,:,:].contiguous()  + 0.0)
+        c = (abc[:,2,:,:].contiguous()  + 1.0)
+        return abc2A(a,b,c) , 1.0
 
 def weights_init(m):
     if isinstance(m, nn.Conv2d):
-        nn.init.orthogonal(m.weight.data, gain=1.0)
+        nn.init.xavier_normal(m.weight.data)
         try:
-            nn.init.constant(m.bias.data, 0.01)
+            nn.init.constant(m.bias.data, 0.0)
         except:
             pass
     return
@@ -87,13 +89,13 @@ def adjust_learning_rate(optimizer):
             group['step'] = 0.
         else:
             group['step'] += 1.
-        group['lr'] =  BASE_LR #*  .0 - float(group['step']) * float(1.0) / (n_triplets * float(n_epochs)))
+        group['lr'] =  BASE_LR *  (1.0 - float(group['step']) * float(1.0) / (n_triplets * float(n_epochs)))
     return
 
 def create_optimizer(model, new_lr, wd):
     # setup optimizer
     optimizer = optim.SGD(model.parameters(), lr=new_lr,
-                          momentum=0.5, dampening=0.5,
+                          momentum=0.9, dampening=0.5,
                           weight_decay=wd)
     return optimizer
 
@@ -123,6 +125,8 @@ def train(train_loader, model, optimizer, epoch, cuda = True):
     # switch to train mode
     model.train()
     log_interval = 1
+    total_loss = 0
+    total_feats = 0
     spatial_only = True
     pbar = enumerate(train_loader)
     for batch_idx, data in pbar:
@@ -136,42 +140,46 @@ def train(train_loader, model, optimizer, epoch, cuda = True):
             print img1.shape, ' too big, skipping'
             continue
         img1 = img1.float().squeeze(0)
-        #img1 = img1 - img1.mean()
-        #img1 = img1 / 50.#(img1.std() + 1e-8)
         img2 = img2.float().squeeze(0)
-        #img2 = img2 - img2.mean()
-        #img2 = img2 / 50.#(img2.std() + 1e-8)
         if cuda:
             img1, img2, H1to2 = img1.cuda(), img2.cuda(), H1to2.cuda()
         img1, img2, H1to2 = Variable(img1, requires_grad = False), Variable(img2, requires_grad = False), Variable(H1to2, requires_grad = False)
-        LAFs1, aff_norm_patches1, resp1, pyr1 = HA(img1)
-        LAFs2, aff_norm_patches2, resp2, pyr2 = HA(img2)
+        LAFs1, aff_norm_patches1, resp1 = HA(img1, True, True, True)
+        LAFs2, aff_norm_patches2, resp2 = HA(img2, True, True)
         if (len(LAFs1) == 0) or (len(LAFs2) == 0):
             optimizer.zero_grad()
             continue
-        fro_dists, idxs_in1, idxs_in2 = get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2,  dist_threshold = 2., 
-                                                                             center_dist_th = 5.0,
+        fro_dists, idxs_in1, idxs_in2, LAFs2_in_1 = get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2,  dist_threshold = 4., 
+                                                                             center_dist_th = 7.0,
                                                                             skip_center_in_Fro = True,
-                                                                            do_up_is_up = True);
+                                                                            do_up_is_up = True,return_LAF2_in_1 = True);
         if  len(fro_dists.size()) == 0:
             optimizer.zero_grad()
             print 'skip'
             continue
-        loss = fro_dists.mean()
-        patch_dist = torch.mean((aff_norm_patches1[idxs_in1.data.long(),:,:,:] - aff_norm_patches2[idxs_in2.data.long(), :,:,:]) **2)
-        print loss.data.cpu().numpy()[0], patch_dist.data.cpu().numpy()[0]
-        loss += patch_dist
+        aff_patches_from_LAFs2_in_1 = extract_patches(img1, normalizeLAFs(LAFs2_in_1[idxs_in2.data.long(),:,:], img1.size(3), img1.size(2)))
+         
+        #loss = fro_dists.mean()
+        patch_dist = torch.sqrt((aff_norm_patches1[idxs_in1.data.long(),:,:,:]/100. - aff_patches_from_LAFs2_in_1/100.) **2 + 1e-8).view(fro_dists.size(0),-1).mean(dim = 1)
+        loss = (fro_dists * patch_dist).mean()
+        print 'Fro dist', fro_dists.mean().data.cpu().numpy()[0], loss.data.cpu().numpy()[0]
+        total_loss += loss.data.cpu().numpy()[0]
+        #loss += patch_dist
+        total_feats += fro_dists.size(0)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         #adjust_learning_rate(optimizer)
         print epoch,batch_idx, loss.data.cpu().numpy()[0], idxs_in1.shape
 
+    print 'Train total loss:', total_loss / float(batch_idx+1), ' features ', float(total_feats) / float(batch_idx+1)
     torch.save({'epoch': epoch + 1, 'state_dict': model.state_dict()},
-               '{}/checkpoint_{}.pth'.format(LOG_DIR, epoch))
+               '{}/elu_new_checkpoint_{}.pth'.format(LOG_DIR, epoch))
 
 def test(test_loader, model, cuda = True):
     # switch to train mode
+    model_num_feats = model.num
+    model.num = 1500;
     model.eval()
     log_interval = 1
     pbar = enumerate(test_loader)
@@ -189,21 +197,12 @@ def test(test_loader, model, cuda = True):
         if cuda:
             img1, img2, H1to2 = img1.cuda(), img2.cuda(), H1to2.cuda()
         img1, img2, H1to2 = Variable(img1, volatile = True), Variable(img2, volatile = True), Variable(H1to2, volatile = True)
-        try:
-            LAFs1, aff_norm_patches1, resp1 = model(img1)
-            LAFs2, aff_norm_patches2, resp2 = model(img2)
-        except:
-            model = model.cpu()
-            img1 = img1.cpu()
-            img2 = img2.cpu()
-            LAFs1, aff_norm_patches1, resp1 = model(img1)
-            LAFs2, aff_norm_patches2, resp2 = model(img2)
-            H1to2 = H1to2.cpu()
-            model = model.cuda()
+        LAFs1, aff_norm_patches1, resp1 = HA(img1)
+        LAFs2, aff_norm_patches2, resp2 = HA(img2)
         if (len(LAFs1) == 0) or (len(LAFs2) == 0):
             continue
         fro_dists, idxs_in1, idxs_in2 = get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2, 
-                                                                                     dist_threshold = 3., 
+                                                                                     dist_threshold = 3.,
                                                                              center_dist_th = 7.0,
                                                                             skip_center_in_Fro = True,
                                                                             do_up_is_up = True);
@@ -211,19 +210,27 @@ def test(test_loader, model, cuda = True):
             print 'skip'
             continue
         loss = fro_dists.mean()
-        total_loss += loss.data.cpu().numpy()[0]
         total_feats += fro_dists.size(0)
+        total_loss += loss.data.cpu().numpy()[0]
         print 'test img', batch_idx, loss.data.cpu().numpy()[0], fro_dists.size(0)
     print 'Total loss:', total_loss / float(batch_idx+1), 'features', float(total_feats) / float(batch_idx+1)
+    model.num = model_num_feats
 
 train_loader, test_loader = create_loaders()
 
-HA = ScaleSpaceAffinePatchExtractor( mrSize = 5.192, num_features = 1500, border = 5, num_Baum_iters = 0)
+HA = ScaleSpaceAffinePatchExtractor( mrSize = 5.192, num_features = 350, border = 5, num_Baum_iters = 2, AffNet = BaumNet())
 
 
 model = HA
 if USE_CUDA:
     model = model.cuda()
 
-test(test_loader, model, cuda = USE_CUDA)
-sys.exit(0)
+optimizer1 = create_optimizer(model.AffNet.features, BASE_LR, 5e-5)
+
+#test(test_loader, model, cuda = USE_CUDA)
+for epoch in range(n_epochs):
+    print 'epoch', epoch
+    if USE_CUDA:
+        model = model.cuda()
+    train(train_loader, model, optimizer1, epoch, cuda = USE_CUDA)
+    test(test_loader, model, cuda = USE_CUDA)
