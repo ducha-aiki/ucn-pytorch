@@ -3,6 +3,46 @@ from torch.autograd import Variable
 import numpy as np
 from LAF import rectifyAffineTransformationUpIsUp
 from Utils import zeros_like
+
+def Px2GridA(w, h):
+    A = torch.eye(3)
+    A[0,0] = 2.0  / float(w)
+    A[1,1] = 2.0  / float(h)
+    A[0,2] = -1
+    A[1,2] = -1
+    return A
+def Grid2PxA(w, h):
+    A = torch.eye(3)
+    A[0,0] = float(w) / 2.0
+    A[0,2] = float(w) / 2.0
+    A[1,1] = float(h) / 2.0
+    A[1,2] = float(h) / 2.0
+    return A
+
+def affineAug(img, max_add = 0.5):
+    img_s = img.squeeze()
+    h,w = img_s.size()
+    ### Generate A
+    A = torch.eye(3)
+    rand_add = max_add *(torch.rand(3,3) - 0.5) * 2.0
+    ##No perspective change
+    rand_add[2,0:2] = 0
+    rand_add[2,2] = 0;
+    A  = A + rand_add
+    denormA = Grid2PxA(w,h)
+    normA = Px2GridA(w, h)
+    if img.is_cuda:
+        A = A.cuda()
+        denormA = denormA.cuda()
+        normA = normA.cuda()
+    normA = Variable(normA)
+    denormA = Variable(denormA)
+    A = Variable(A)
+    grid = torch.nn.functional.affine_grid(A[0:2,:].unsqueeze(0), torch.Size((1,1,h,w)))
+    H_Orig2New = torch.mm(torch.mm(denormA, torch.inverse(A)), normA)
+    new_img = torch.nn.functional.grid_sample(img_s.float().unsqueeze(0).unsqueeze(0),  grid)  
+    return new_img, H_Orig2New, 
+
 def distance_matrix_vector(anchor, positive):
     """Given batch of anchor descriptors and positive descriptors calculate distance matrix"""
 
