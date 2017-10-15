@@ -24,7 +24,7 @@ def reprojectLAFs(LAFs1, H1to2, return_LHFs = False):
     LHF1 = LAFs_to_H_frames(LAFs1)
     LHF1_in_2 = zeros_like(LHF1)
     LHF1_in_2[:,:,2] = torch.bmm(H1to2.expand(LHF1.size(0),3,3), LHF1[:,:,2:])
-    LHF1_in_2[:,:,2] = LHF1_in_2[:,:,2] / LHF1_in_2[:,2,2]
+    LHF1_in_2[:,:,2] = LHF1_in_2[:,:,2] / LHF1_in_2[:,2:,2].expand(LHF1_in_2.size(0), 3)
     As  = linH(H1to2, LAFs1[:,0,2], LAFs1[:,1,2])
     LHF1_in_2[:,0:2,0:2] = torch.bmm(As, LHF1[:,0:2,0:2])
     if return_LHFs:
