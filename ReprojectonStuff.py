@@ -22,14 +22,22 @@ def linH(H, x, y):
 
 def reprojectLAFs(LAFs1, H1to2, return_LHFs = False):
     LHF1 = LAFs_to_H_frames(LAFs1)
-    LHF1_in_2 = zeros_like(LHF1)
-    LHF1_in_2[:,:,2] = torch.bmm(H1to2.expand(LHF1.size(0),3,3), LHF1[:,:,2:])
-    LHF1_in_2[:,:,2] = LHF1_in_2[:,:,2] / LHF1_in_2[:,2:,2].expand(LHF1_in_2.size(0), 3)
+    #LHF1_in_2 = torch.zeros(LHF1.size(0), ,3,3)
+    #if LHF1.is_cuda:
+    #    LHF1_in_2 = LHF1_in_2.cuda()
+    #LHF1_in_2 = Variable(LHF1_in_2)
+    #LHF1_in_2[:,:,2] = torch.bmm(H1to2.expand(LHF1.size(0),3,3), LHF1[:,:,2:])
+    #LHF1_in_2[:,:,2] = LHF1_in_2[:,:,2] / LHF1_in_2[:,2:,2].expand(LHF1_in_2.size(0), 3)
+    #As  = linH(H1to2, LAFs1[:,0,2], LAFs1[:,1,2])
+    #LHF1_in_2[:,0:2,0:2] = torch.bmm(As, LHF1[:,0:2,0:2])
+    xy1 = torch.bmm(H1to2.expand(LHF1.size(0),3,3), LHF1[:,:,2:])
+    xy1 = xy1 / xy1[:,2:,:].expand(xy1.size(0), 3, 1)
     As  = linH(H1to2, LAFs1[:,0,2], LAFs1[:,1,2])
-    LHF1_in_2[:,0:2,0:2] = torch.bmm(As, LHF1[:,0:2,0:2])
+    AF = torch.bmm(As, LHF1[:,0:2,0:2])
+    
     if return_LHFs:
-        return LHF1_in_2
-    return LHF1_in_2[:,:2, :]
+        return LAFs_to_H_frames(torch.cat([AF, xy1[:,:2,:]], dim = 2))
+    return torch.cat([AF, xy1[:,:2,:]], dim = 2)
 
 def Px2GridA(w, h):
     A = torch.eye(3)

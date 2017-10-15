@@ -20,7 +20,7 @@ from tqdm import tqdm
 USE_CUDA = True
 
 LOG_DIR = 'log_snaps'
-BASE_LR = 0.01
+BASE_LR = 0.001
 start = 0
 end = 25
 n_epochs = end - start
@@ -145,13 +145,14 @@ def train(train_loader, model, optimizer, epoch, cuda = True):
             img1, img2, H1to2 = img1.cuda(), img2.cuda(), H1to2.cuda()
         img1, img2, H1to2 = Variable(img1, requires_grad = False), Variable(img2, requires_grad = False), Variable(H1to2, requires_grad = False)
         new_img2, H_Orig2New = affineAug(img2)
-        H1to2 = torch.mm(H1to2, H_Orig2New)
+        H1to2new = torch.mm(H_Orig2New, H1to2)
+        #print H1to2
         LAFs1, aff_norm_patches1, resp1 = HA(img1, True, True, True)
         LAFs2, aff_norm_patches2, resp2 = HA(new_img2, True, True)
         if (len(LAFs1) == 0) or (len(LAFs2) == 0):
             optimizer.zero_grad()
             continue
-        fro_dists, idxs_in1, idxs_in2, LAFs2_in_1 = get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2,  dist_threshold = 4., 
+        fro_dists, idxs_in1, idxs_in2, LAFs2_in_1 = get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2new,  dist_threshold = 4., 
                                                                              center_dist_th = 7.0,
                                                                             skip_center_in_Fro = True,
                                                                             do_up_is_up = True,return_LAF2_in_1 = True);
@@ -227,7 +228,7 @@ model = HA
 if USE_CUDA:
     model = model.cuda()
 
-optimizer1 = create_optimizer(model.AffNet.features, BASE_LR, 5e-5)
+optimizer1 = create_optimizer(model.AffNet.features, BASE_LR, 1e-4)
 
 #test(test_loader, model, cuda = USE_CUDA)
 for epoch in range(n_epochs):
