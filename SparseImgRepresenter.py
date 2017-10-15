@@ -182,9 +182,11 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
             responses, LAFs, final_pyr_idxs, final_level_idxs  = self.getAffineShape(scale_pyr, responses, LAFs,
                                                                                      final_pyr_idxs, final_level_idxs, self.num, n_iters = n_iters)
         #LAFs = self.getOrientation(scale_pyr, LAFs, final_pyr_idxs, final_level_idxs)
+        #if return_patches:
+        #    pyr_inv_idxs = get_inverted_pyr_index(scale_pyr, final_pyr_idxs, final_level_idxs)
+        #    patches = extract_patches_from_pyramid_with_inv_index(scale_pyr, pyr_inv_idxs, LAFs, PS = self.PS)
         if return_patches:
-            pyr_inv_idxs = get_inverted_pyr_index(scale_pyr, final_pyr_idxs, final_level_idxs)
-            patches = extract_patches_from_pyramid_with_inv_index(scale_pyr, pyr_inv_idxs, LAFs, PS = self.PS)
+            patches = extract_patches(x, LAFs, PS = self.PS)
         else:
             patches = None
         return denormalizeLAFs(LAFs, x.size(3), x.size(2)), patches, responses#, scale_pyr

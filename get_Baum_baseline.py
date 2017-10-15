@@ -204,6 +204,7 @@ def test(test_loader, model, cuda = True):
             continue
         fro_dists, idxs_in1, idxs_in2 = get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2, 
                                                                                      dist_threshold = 3., 
+                                                                                      scale_diff_coef = 0.4, 
                                                                              center_dist_th = 7.0,
                                                                             skip_center_in_Fro = True,
                                                                             do_up_is_up = True);

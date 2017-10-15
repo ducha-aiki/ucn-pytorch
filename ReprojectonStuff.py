@@ -88,6 +88,11 @@ def distance_matrix_vector(anchor, positive):
                        torch.t(d2_sq.expand(anchor.size(0), positive.size(0)))
                       - 2.0 * torch.bmm(positive.unsqueeze(0), torch.t(anchor).unsqueeze(0)).squeeze(0))+eps))
 
+def ratio_matrix_vector(a, p):
+    eps = 1e-9
+    return a.expand(p.size(0), a.size(0)) / (torch.t(p.expand(a.size(0), p.size(0))) + eps)
+
+
 def LAFs_to_H_frames(aff_pts):
     H3_x = torch.Tensor([0, 0, 1 ]).unsqueeze(0).unsqueeze(0).expand_as(aff_pts[:,0:1,:]);
     if aff_pts.is_cuda:
@@ -157,8 +162,13 @@ def get_GT_correspondence_indexes_Fro(LAFs1,LAFs2, H1to2, dist_threshold = 4,
     mask =  min_dist <= dist_threshold
     return min_dist[mask], plain_indxs_in1[mask], idxs_in_2[mask]
 
-def get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2, dist_threshold = 4, center_dist_th = 2.0,
-                                                 skip_center_in_Fro = False, do_up_is_up = False, return_LAF2_in_1 = False):
+def get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2, 
+                                                 dist_threshold = 4, 
+                                                 center_dist_th = 2.0,
+                                                 scale_diff_coef = 0.3,
+                                                 skip_center_in_Fro = False,
+                                                 do_up_is_up = False,
+                                                 return_LAF2_in_1 = False):
     LHF2_in_1_pre = reprojectLAFs(LAFs2, torch.inverse(H1to2), True)
     if do_up_is_up:
         sc = torch.sqrt(LHF2_in_1_pre[:,0,0] * LHF2_in_1_pre[:,1,1] - LHF2_in_1_pre[:,1,0] * LHF2_in_1_pre[:,0,1]).unsqueeze(-1).unsqueeze(-1).expand(LHF2_in_1_pre.size(0), 2,2)
@@ -175,9 +185,13 @@ def get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2, dist_thresh
     #### Center replated
     just_centers1 = LAFs1[:,:,2];
     just_centers2_repr_to_1 = LHF2_in_1[:,0:2,2];
+    if scale_diff_coef > 0:
+        scales1 = torch.sqrt(LAFs1[:,0,0] * LAFs1[:,1,1] - LAFs1[:,1,0] * LAFs1[:,0,1])
+        scales2 = torch.sqrt(LHF2_in_1[:,0,0] * LHF2_in_1[:,1,1] - LHF2_in_1[:,1,0] * LHF2_in_1[:,0,1])
+        scale_matrix = ratio_matrix_vector(scales2, scales1)
+        scale_dist_mask = (torch.abs(1.0 - scale_matrix) <= scale_diff_coef) 
     center_dist_mask  = distance_matrix_vector(just_centers2_repr_to_1, just_centers1) >= center_dist_th
-    
-    frob_norm_dist_masked = center_dist_mask.float() * 1000. + frob_norm_dist;
+    frob_norm_dist_masked = (1.0 - scale_dist_mask.float() + center_dist_mask.float()) * 100. + frob_norm_dist;
     
     min_dist, idxs_in_2 = torch.min(frob_norm_dist_masked,1)
     plain_indxs_in1 = torch.arange(0, idxs_in_2.size(0))

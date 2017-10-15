@@ -148,14 +148,17 @@ def train(train_loader, model, optimizer, epoch, cuda = True):
         H1to2new = torch.mm(H_Orig2New, H1to2)
         #print H1to2
         LAFs1, aff_norm_patches1, resp1 = HA(img1, True, True, True)
-        LAFs2, aff_norm_patches2, resp2 = HA(new_img2, True, True)
-        if (len(LAFs1) == 0) or (len(LAFs2) == 0):
+        LAFs2Aug, aff_norm_patches2, resp2 = HA(new_img2, True, True)
+        if (len(LAFs1) == 0) or (len(LAFs2Aug) == 0):
             optimizer.zero_grad()
             continue
-        fro_dists, idxs_in1, idxs_in2, LAFs2_in_1 = get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2new,  dist_threshold = 4., 
-                                                                             center_dist_th = 7.0,
+        fro_dists, idxs_in1, idxs_in2, LAFs2_in_1 = get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2Aug, H1to2new,
+                                                                            dist_threshold = 10.0, 
+                                                                            center_dist_th = 7.0,
+                                                                            scale_diff_coef = 0.4, 
                                                                             skip_center_in_Fro = True,
-                                                                            do_up_is_up = True,return_LAF2_in_1 = True);
+                                                                            do_up_is_up = True,
+                                                                            return_LAF2_in_1 = True);
         if  len(fro_dists.size()) == 0:
             optimizer.zero_grad()
             print 'skip'
@@ -205,8 +208,9 @@ def test(test_loader, model, cuda = True):
         if (len(LAFs1) == 0) or (len(LAFs2) == 0):
             continue
         fro_dists, idxs_in1, idxs_in2 = get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2, 
-                                                                                     dist_threshold = 3.,
+                                                                             dist_threshold = 3.,
                                                                              center_dist_th = 7.0,
+                                                                             scale_diff_coef = 0.4, 
                                                                             skip_center_in_Fro = True,
                                                                             do_up_is_up = True);
         if  len(fro_dists.size()) == 0:
