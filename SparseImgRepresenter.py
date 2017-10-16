@@ -139,8 +139,9 @@ class ScaleSpaceAffinePatchExtractor(nn.Module):
             final_level_idxs = final_level_idxs[idxs]
             base_A = torch.index_select(base_A, 0, idxs)
             LAFs = torch.index_select(LAFs, 0, idxs)
-        
-        new_LAFs = torch.cat([torch.bmm(rectifyAffineTransformationUpIsUp(base_A), LAFs[:,:,0:2]),
+        #new_LAFs = torch.cat([torch.bmm(rectifyAffineTransformationUpIsUp(base_A), LAFs[:,:,0:2]),
+        #                       LAFs[:,:,2:]], dim =2)
+        new_LAFs = torch.cat([torch.bmm(base_A, LAFs[:,:,0:2]),
                                LAFs[:,:,2:]], dim =2)
         return final_resp, new_LAFs, final_pyr_idxs, final_level_idxs  
     

@@ -110,6 +110,7 @@ def inverseLHFs(LHFs):
         LHF1_inv[i,:,:] = LHFs[i,:,:].inverse()
     return LHF1_inv
 
+    
 def reproject_to_canonical_Frob_batched(LHF1_inv, LHF2, batch_size = 2, skip_center = False):
     out = torch.zeros((LHF1_inv.size(0), LHF2.size(0)))
     eye1 = torch.eye(3)
@@ -168,7 +169,8 @@ def get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2,
                                                  scale_diff_coef = 0.3,
                                                  skip_center_in_Fro = False,
                                                  do_up_is_up = False,
-                                                 return_LAF2_in_1 = False):
+                                                 return_LAF2_in_1 = False,
+                                                 inv_to_eye = True):
     LHF2_in_1_pre = reprojectLAFs(LAFs2, torch.inverse(H1to2), True)
     if do_up_is_up:
         sc = torch.sqrt(LHF2_in_1_pre[:,0,0] * LHF2_in_1_pre[:,1,1] - LHF2_in_1_pre[:,1,0] * LHF2_in_1_pre[:,0,1]).unsqueeze(-1).unsqueeze(-1).expand(LHF2_in_1_pre.size(0), 2,2)
@@ -180,8 +182,15 @@ def get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2,
         LHF2_in_1[:,:, 2] = LHF2_in_1_pre[:,:,2]
     else:
         LHF2_in_1 = LHF2_in_1_pre
-    LHF1_inv = inverseLHFs(LAFs_to_H_frames(LAFs1))
-    frob_norm_dist = reproject_to_canonical_Frob_batched(LHF1_inv, LHF2_in_1, batch_size = 2, skip_center = skip_center_in_Fro)
+    LHF1 = LAFs_to_H_frames(LAFs1)
+    if inv_to_eye:
+        LHF1_inv = inverseLHFs(LHF1)
+        frob_norm_dist = reproject_to_canonical_Frob_batched(LHF1_inv, LHF2_in_1, batch_size = 2, skip_center = skip_center_in_Fro)
+    else:
+        if not skip_center_in_Fro:
+            frob_norm_dist = distance_matrix_vector(LHF2_in_1.view(LHF2_in_1.size(0), -1), LHF1.view(LHF1.size(0),-1))
+        else:
+            frob_norm_dist = distance_matrix_vector(LHF2_in_1[:,0:2, 0:2].contiguous().view(LHF2_in_1.size(0), -1), LHF1[:,0:2,0:2].contiguous().view(LHF1.size(0),-1))
     #### Center replated
     just_centers1 = LAFs1[:,:,2];
     just_centers2_repr_to_1 = LHF2_in_1[:,0:2,2];
