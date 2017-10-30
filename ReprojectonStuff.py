@@ -84,13 +84,13 @@ def distance_matrix_vector(anchor, positive):
 
     d1_sq = torch.sum(anchor * anchor, dim=1)
     d2_sq = torch.sum(positive * positive, dim=1)
-    eps = 1e-6
+    eps = 1e-12
     return torch.sqrt(torch.abs((d1_sq.expand(positive.size(0), anchor.size(0)) +
                        torch.t(d2_sq.expand(anchor.size(0), positive.size(0)))
                       - 2.0 * torch.bmm(positive.unsqueeze(0), torch.t(anchor).unsqueeze(0)).squeeze(0))+eps))
 
 def ratio_matrix_vector(a, p):
-    eps = 1e-9
+    eps = 1e-12
     return a.expand(p.size(0), a.size(0)) / (torch.t(p.expand(a.size(0), p.size(0))) + eps)
 
 
@@ -174,16 +174,18 @@ def get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2,
                                                  inv_to_eye = True):
     LHF2_in_1_pre = reprojectLAFs(LAFs2, torch.inverse(H1to2), True)
     if do_up_is_up:
-        sc = torch.sqrt(LHF2_in_1_pre[:,0,0] * LHF2_in_1_pre[:,1,1] - LHF2_in_1_pre[:,1,0] * LHF2_in_1_pre[:,0,1]).unsqueeze(-1).unsqueeze(-1).expand(LHF2_in_1_pre.size(0), 2,2)
+        sc2 = torch.sqrt(torch.abs(LHF2_in_1_pre[:,0,0] * LHF2_in_1_pre[:,1,1] - LHF2_in_1_pre[:,1,0] * LHF2_in_1_pre[:,0,1])).unsqueeze(-1).unsqueeze(-1).expand(LHF2_in_1_pre.size(0), 2,2)
         LHF2_in_1 = torch.zeros(LHF2_in_1_pre.size())
         if LHF2_in_1_pre.is_cuda:
             LHF2_in_1 = LHF2_in_1.cuda()
         LHF2_in_1 = Variable(LHF2_in_1)
-        LHF2_in_1[:, :2,:2] = rectifyAffineTransformationUpIsUp(LHF2_in_1_pre[:, :2,:2]/sc) * sc
+        LHF2_in_1[:, :2,:2] = rectifyAffineTransformationUpIsUp(LHF2_in_1_pre[:, :2,:2]/sc2) * sc2
         LHF2_in_1[:,:, 2] = LHF2_in_1_pre[:,:,2]
+        sc1 = torch.sqrt(torch.abs(LAFs1[:,0,0] * LAFs1[:,1,1] - LAFs1[:,1,0] * LAFs1[:,0,1])).unsqueeze(-1).unsqueeze(-1).expand(LAFs1.size(0), 2,2)
+        LHF1 = LAFs_to_H_frames(torch.cat([rectifyAffineTransformationUpIsUp(LAFs1[:, :2,:2]/sc1) * sc1, LAFs1[:,:,2:]], dim = 2 ))
     else:
         LHF2_in_1 = LHF2_in_1_pre
-    LHF1 = LAFs_to_H_frames(LAFs1)
+        LHF1 = LAFs_to_H_frames(LAFs1)
     if inv_to_eye:
         LHF1_inv = inverseLHFs(LHF1)
         frob_norm_dist = reproject_to_canonical_Frob_batched(LHF1_inv, LHF2_in_1, batch_size = 2, skip_center = skip_center_in_Fro)
@@ -196,12 +198,12 @@ def get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2,
     just_centers1 = LAFs1[:,:,2];
     just_centers2_repr_to_1 = LHF2_in_1[:,0:2,2];
     if scale_diff_coef > 0:
-        scales1 = torch.sqrt(LAFs1[:,0,0] * LAFs1[:,1,1] - LAFs1[:,1,0] * LAFs1[:,0,1])
-        scales2 = torch.sqrt(LHF2_in_1[:,0,0] * LHF2_in_1[:,1,1] - LHF2_in_1[:,1,0] * LHF2_in_1[:,0,1])
+        scales1 = torch.sqrt(torch.abs(LAFs1[:,0,0] * LAFs1[:,1,1] - LAFs1[:,1,0] * LAFs1[:,0,1]))
+        scales2 = torch.sqrt(torch.abs(LHF2_in_1[:,0,0] * LHF2_in_1[:,1,1] - LHF2_in_1[:,1,0] * LHF2_in_1[:,0,1]))
         scale_matrix = ratio_matrix_vector(scales2, scales1)
         scale_dist_mask = (torch.abs(1.0 - scale_matrix) <= scale_diff_coef) 
     center_dist_mask  = distance_matrix_vector(just_centers2_repr_to_1, just_centers1) >= center_dist_th
-    frob_norm_dist_masked = (1.0 - scale_dist_mask.float() + center_dist_mask.float()) * 100. + frob_norm_dist;
+    frob_norm_dist_masked = (1.0 - scale_dist_mask.float() + center_dist_mask.float()) * 1000. + frob_norm_dist;
     
     min_dist, idxs_in_2 = torch.min(frob_norm_dist_masked,1)
     plain_indxs_in1 = torch.arange(0, idxs_in_2.size(0))
