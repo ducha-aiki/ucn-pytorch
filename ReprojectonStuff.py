@@ -1,5 +1,6 @@
 import torch
 from torch.autograd import Variable
+from torch.autograd import Variable as V
 import numpy as np
 from LAF import rectifyAffineTransformationUpIsUp
 from Utils import zeros_like
@@ -215,6 +216,92 @@ def get_GT_correspondence_indexes_Fro_and_center(LAFs1,LAFs2, H1to2,
         return min_dist[mask], plain_indxs_in1[mask], idxs_in_2[mask], LHF2_in_1[:,0:2,:]
     else:
         return min_dist[mask], plain_indxs_in1[mask], idxs_in_2[mask]
+def get_closest_correspondences_idxs(LHF1, LHF2_in_1, xy_th, scale_log):
+    xy1 = LHF1[:,0:2,2];
+    xy2in1 = LHF2_in_1[:,0:2,2];
+    center_dist_matrix =  distance_matrix_vector(xy2in1, xy1)
+    scales1 = torch.sqrt(torch.abs(LHF1[:,0,0] * LHF1[:,1,1] - LHF1[:,1,0] * LHF1[:,0,1]));
+    scales2 = torch.sqrt(torch.abs(LHF2_in_1[:,0,0] * LHF2_in_1[:,1,1] - LHF2_in_1[:,1,0] * LHF2_in_1[:,0,1]));
+    scale_matrix = torch.abs(torch.log(ratio_matrix_vector(scales2, scales1)))
+    mask_matrix = 1000.0*(scale_matrix  > scale_log).float() * (center_dist_matrix > xy_th).float() + center_dist_matrix + scale_matrix
+
+    d2_to_1, nn_idxs_in_2 = torch.min(mask_matrix,1)
+    d1_to_2, nn_idxs_in_1 = torch.min(mask_matrix,0)
+
+    flat_idxs_1 = torch.arange(0, nn_idxs_in_2.size(0));
+    if LHF1.is_cuda:
+        flat_idxs_1 = flat_idxs_1.cuda()
+    mask = d2_to_1 <= 100.0;
+
+    final_mask = (flat_idxs_1 == nn_idxs_in_1[nn_idxs_in_2.data].data.float()).float() * mask.data.float()
+    idxs_in1 = flat_idxs_1[final_mask.long()].nonzero().squeeze()
+    idxs_in_2_final = nn_idxs_in_2[idxs_in1];
+    #torch.arange(0, nn_idxs_in_2.size(0))#[mask2.data]
+    return idxs_in1, idxs_in_2_final
+def get_LHFScale(LHF):
+    return torch.sqrt(torch.abs(LHF[:,0,0] * LHF[:,1,1] - LHF[:,1,0] * LHF[:,0,1]));
+def LAFMagic(LAFs1, LAFs2, H1to2, xy_th  = 5.0, scale_log = 0.4, t = 1.0, sc = 1.0, aff = 1.0):
+    LHF2_in_1 = reprojectLAFs(LAFs2, torch.inverse(H1to2), True)
+    LHF1 = LAFs_to_H_frames(LAFs1)
+    idxs_in1, idxs_in_2 = get_closest_correspondences_idxs(LHF1, LHF2_in_1, xy_th, scale_log)
+    if len(idxs_in1) == 0:
+        print('Warning, no correspondences found')
+        return None
+    LHF1_good = LHF1[idxs_in1,:,:]
+    LHF2_good = LHF2_in_1[idxs_in_2,:,:]
+    scales1 = get_LHFScale(LHF1_good);
+    scales2 = get_LHFScale(LHF2_good);
+    max_scale = torch.max(scales1,scales2);
+    min_scale = torch.min(scales1, scales2);
+    mean_scale = 0.5 * (max_scale + min_scale)
+    eps = 1e-12;
+    if t != 0:
+        dist_loss = torch.sqrt(torch.sum((LHF1_good[:,0:2,2] - LHF2_good[:,0:2,2])**2, dim = 1) + eps) / V(mean_scale.data);
+    else:
+        dist_loss = 0
+    if sc != 0 :
+        scale_loss = torch.log1p( (max_scale-min_scale)/(mean_scale))
+    else:
+        scale_loss = 0
+    if aff != 0:
+        A1 = LHF1_good[:,:2,:2] / scales1.view(-1,1,1).expand(scales1.size(0),2,2);
+        A2 = LHF2_good[:,:2,:2] / scales2.view(-1,1,1).expand(scales2.size(0),2,2);
+        shape_loss = ((A1 - A2)**2).mean(dim = 1).mean(dim = 1);
+    else:
+        shape_loss = 0;
+    loss = t * dist_loss + sc * scale_loss + aff *shape_loss;
+    #print dist_loss, scale_loss, shape_loss
+    return loss, idxs_in1, idxs_in_2, LHF2_in_1[:,0:2,:]
+def LAFMagicFro(LAFs1, LAFs2, H1to2, xy_th  = 5.0, scale_log = 0.4):
+    LHF2_in_1 = reprojectLAFs(LAFs2, torch.inverse(H1to2), True)
+    LHF1 = LAFs_to_H_frames(LAFs1)
+    idxs_in1, idxs_in_2 = get_closest_correspondences_idxs(LHF1, LHF2_in_1, xy_th, scale_log)
+    if len(idxs_in1) == 0:
+        print('Warning, no correspondences found')
+        return None
+    LHF1_good = LHF1[idxs_in1,:,:]
+    LHF2_good = LHF2_in_1[idxs_in_2,:,:]
+    scales1 = get_LHFScale(LHF1_good);
+    scales2 = get_LHFScale(LHF2_good);
+    max_scale = torch.max(scales1,scales2);
+    min_scale = torch.min(scales1, scales2);
+    mean_scale = 0.5 * (max_scale + min_scale)
+    eps = 1e-12;
+    dist_loss = (torch.sqrt((LHF1_good.view(-1,9) - LHF2_good.view(-1,9))**2 + eps) / V(mean_scale.data).view(-1,1).expand(LHF1_good.size(0),9)).mean(dim=1); 
+    loss = dist_loss;
+    #print dist_loss, scale_loss, shape_loss
+    return loss, idxs_in1, idxs_in_2, LHF2_in_1[:,0:2,:]
+def pr_l(x):
+    return x.mean().data.cpu().numpy()[0]
+def add_1(A):
+    add = torch.eye(2).unsqueeze(0).expand(A.size(0),2,2)
+    add = torch.cat([add, torch.zeros(A.size(0),2,1)], dim = 2)
+    if A.is_cuda:
+        add = add.cuda()
+    add = Variable(add)
+    return add
+def identity_loss(A):
+    return torch.clamp(torch.sqrt((A - add_1(A))**2 + 1e-15).view(-1,6).mean(dim = 1) - 0.3*0, min = 0.0, max = 100.0).mean()
 
 
 
